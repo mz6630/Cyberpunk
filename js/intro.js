@@ -18,6 +18,7 @@
   11.50 – 19.00 붉은 노이즈 배경 유지 → 메인으로 전환
 
    효과음: js/sfx.js (Web Audio 합성, 자동 재생 시도 → 막히면 첫 클릭부터 이어서 재생)
+   칩 스테이지: 11.65초부터 붉은 화면에서 칩을 포트에 꽂으면 → 카프리 스파크 → 정전 → 메인
    로고 이미지: assets/logo.png (영상에서 추출한 'Cyberpunk' 글자, 투명 배경)
    아래 줄 'WEBSITE'는 SUB 설정으로 캔버스에 직접 그립니다 (Barlow Condensed).
    ========================================================= */
@@ -102,6 +103,8 @@
     H = Math.floor(window.innerHeight * dpr);
     canvas.width = W;
     canvas.height = H;
+    const fx = document.getElementById('fx-canvas');
+    if (fx) { fx.width = W; fx.height = H; }
     u = Math.min(H / 1080, W / 1920 * 1.4);
     bgLayer = buildBackground();
   }
@@ -615,21 +618,386 @@
     }
   }
 
+  /* =========================================================
+     칩 스테이지
+     인트로가 붉은 화면(11.5초)에 도달하면 포트와 칩이 나타난다.
+     칩을 포트에 꽂으면
+       ① 카프리 색(마젠타·형광 연두·보라)의 전기 스파크가 화면을 뒤덮고
+       ② 정전된 것처럼 화면이 검게 꺼진 뒤 메인이 나타난다.
+     ========================================================= */
+  const stage = document.getElementById('stage');
+  const port = document.getElementById('port');
+  const portStatus = port.querySelector('.port-label span');
+  const chip = document.getElementById('chip');
+  const guide = document.getElementById('guide');
+  const hint = document.getElementById('stage-hint');
+  const fxCanvas = document.getElementById('fx-canvas');
+  const fxCtx = fxCanvas.getContext('2d');
+
+  const CAPRI = { pink: '#f9034a', green: '#12f870', violet: '#8f32bd', hot: '#ffd6e2' };
+  const CHIP_RATIO = 235 / 1100;        // assets/chip.png 세로/가로
+  const PIN_CY = 0.522;                 // 칩 높이 대비 핀 중심
+  const PIN_SPAN = 0.84 - 0.205;        // 칩 높이 대비 핀 높이
+  const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
+  const STORM_DUR = reduceMotion ? 1.2 : 1.9;
+  const BLACK_HOLD = 1.5;
+
+  let mode = 'intro';                   // intro → stage → insert → storm → black
+  let L = null;                         // 레이아웃 (CSS px)
+  let chipPos = { x: 0, y: 0, rot: -6 };
+  let drag = null;
+  let stormStart = 0;
+  let blackStart = 0;
+  let dyingDone = false;
+  const bolts = [];
+  const shards = [];
+  const motes = [];
+  let lastBoltSfx = 0;
+
+  function layoutStage() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const CW = Math.min(vw * (vw < vh ? 0.52 : 0.42), 620, vh * 1.5);
+    const CH = CW * CHIP_RATIO;
+    const cy = vh * 0.47;
+    const portW = Math.max(90, CW * 0.34);
+    const portH = Math.max(70, CH * 1.75);
+    const portRight = Math.max(portW + 16, vw * 0.5 - CW * 0.3);
+    const slotH = CH * PIN_SPAN * 1.12;
+    const startX = Math.min(portRight + Math.max(70, vw * 0.1), vw - CW - 12);
+    L = { vw, vh, CW, CH, cy, portW, portH, portRight, slotH, startX, startY: cy - CH * PIN_CY, depth: CW * 0.13 };
+
+    Object.assign(port.style, { left: `${portRight - portW}px`, top: `${cy - portH / 2}px`, width: `${portW}px`, height: `${portH}px` });
+    port.style.setProperty('--slot-top', `${portH / 2 - slotH / 2}px`);
+    port.style.setProperty('--slot-h', `${slotH}px`);
+    Object.assign(chip.style, { width: `${CW}px`, height: `${CH}px` });
+    const gx0 = portRight + 14, gx1 = startX - 14;
+    Object.assign(guide.style, { left: `${gx0}px`, top: `${cy}px`, width: `${Math.max(0, gx1 - gx0)}px`, display: gx1 - gx0 > 30 ? '' : 'none' });
+    hint.style.top = `${cy + portH / 2 + 64}px`;
+  }
+
+  function placeChip() {
+    chip.style.transform = `translate(${chipPos.x}px, ${chipPos.y}px) rotate(${chipPos.rot}deg)`;
+    const inside = L.portRight - chipPos.x;      // 포트 안으로 들어간 부분은 가림
+    chip.style.clipPath = mode === 'insert' && inside > 0 ? `inset(-40px -40px -40px ${inside}px)` : '';
+  }
+
+  function resetStage() {
+    mode = 'intro';
+    stage.hidden = true;
+    stage.className = '';
+    port.className = '';
+    portStatus.textContent = 'SLOT 01 // AWAITING SHARD';
+    intro.style.transform = '';
+    bolts.length = 0; shards.length = 0; motes.length = 0;
+    dyingDone = false;
+    fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+  }
+
+  function enterStage() {
+    mode = 'stage';
+    layoutStage();
+    chipPos = { x: L.startX, y: L.startY, rot: -6 };
+    placeChip();
+    stage.hidden = false;
+    requestAnimationFrame(() => stage.classList.add('is-on'));
+  }
+
+  // 핀 끝 ↔ 포트 입구 거리
+  function tipDistance() {
+    const tx = chipPos.x, ty = chipPos.y + L.CH * PIN_CY;
+    return Math.hypot(tx - L.portRight, ty - L.cy);
+  }
+  const snapRadius = () => Math.max(70, L.CW * 0.2);
+
+  chip.addEventListener('pointerdown', (e) => {
+    if (mode !== 'stage') return;
+    e.stopPropagation();
+    e.preventDefault();
+    SFX.unlock().then(syncAudio);
+    chip.setPointerCapture(e.pointerId);
+    drag = { id: e.pointerId, dx: e.clientX - chipPos.x, dy: e.clientY - chipPos.y };
+    stage.classList.add('is-dragging');
+  });
+  chip.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    chipPos.x = e.clientX - drag.dx;
+    chipPos.y = e.clientY - drag.dy;
+    chipPos.rot += (0 - chipPos.rot) * 0.3;
+    placeChip();
+    port.classList.toggle('is-near', tipDistance() < snapRadius() * 2);
+  });
+  const endDrag = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    stage.classList.remove('is-dragging');
+    port.classList.remove('is-near');
+    if (tipDistance() < snapRadius()) insertChip();
+    else { chipPos.rot = -3; placeChip(); }
+  };
+  chip.addEventListener('pointerup', endDrag);
+  chip.addEventListener('pointercancel', endDrag);
+  chip.addEventListener('click', (e) => { e.stopPropagation(); if (e.detail === 0) insertChip(); }); // 키보드(Enter/Space)
+
+  function tween(from, to, ms, ease, onDone) {
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / ms);
+      const e = ease(k);
+      chipPos.x = from.x + (to.x - from.x) * e;
+      chipPos.y = from.y + (to.y - from.y) * e;
+      chipPos.rot = from.rot + (to.rot - from.rot) * e;
+      placeChip();
+      if (k < 1) requestAnimationFrame(step); else if (onDone) onDone();
+    };
+    requestAnimationFrame(step);
+  }
+
+  function insertChip() {
+    if (mode !== 'stage') return;
+    SFX.unlock().then(syncAudio);
+    mode = 'insert';
+    stage.classList.add('is-inserting');
+    const aligned = { x: L.portRight + 4, y: L.cy - L.CH * PIN_CY, rot: 0 };
+    tween({ ...chipPos }, aligned, 260, (k) => 1 - Math.pow(1 - k, 3), () => {
+      SFX.insert();
+      tween({ ...aligned }, { ...aligned, x: aligned.x - L.depth }, 300, (k) => k * k, () => {
+        port.classList.add('is-locked');
+        portStatus.textContent = 'SHARD LINKED // CAPRI.EXE';
+        // 핸드셰이크 후 폭풍
+        setTimeout(startStorm, 420);
+      });
+    });
+  }
+
+  /* ---------- 카프리 스파크 ---------- */
+  // 들쭉날쭉한 번개 경로 (중간점 변위)
+  function boltPath(x0, y0, x1, y1, rough, iters) {
+    let pts = [[x0, y0], [x1, y1]];
+    for (let i = 0; i < iters; i++) {
+      const next = [pts[0]];
+      for (let j = 1; j < pts.length; j++) {
+        const [ax, ay] = pts[j - 1], [bx, by] = pts[j];
+        const len = Math.hypot(bx - ax, by - ay);
+        const off = (Math.random() - 0.5) * len * rough;
+        const nx = -(by - ay) / (len || 1), ny = (bx - ax) / (len || 1);
+        next.push([(ax + bx) / 2 + nx * off, (ay + by) / 2 + ny * off], [bx, by]);
+      }
+      pts = next;
+    }
+    return pts;
+  }
+
+  function spawnBolt(x0, y0, x1, y1, power, color) {
+    const now = performance.now();
+    const main = boltPath(x0, y0, x1, y1, 0.55, 6);
+    const paths = [{ pts: main, w: power }];
+    // 가지
+    const nBranch = 1 + Math.floor(Math.random() * 3 * power);
+    for (let i = 0; i < nBranch; i++) {
+      const p = main[Math.floor(Math.random() * (main.length - 2)) + 1];
+      const ang = Math.atan2(y1 - y0, x1 - x0) + (Math.random() - 0.5) * 2.2;
+      const len = Math.hypot(x1 - x0, y1 - y0) * (0.15 + Math.random() * 0.35);
+      paths.push({ pts: boltPath(p[0], p[1], p[0] + Math.cos(ang) * len, p[1] + Math.sin(ang) * len, 0.6, 4), w: power * 0.5 });
+    }
+    bolts.push({ paths, born: now, life: 70 + Math.random() * 120, color });
+    // 끝에서 튀는 반짝이 점
+    for (let i = 0; i < 6 * power; i++) {
+      motes.push({ x: x1 + (Math.random() - 0.5) * 60 * u, y: y1 + (Math.random() - 0.5) * 60 * u, s: (1 + Math.random() * 2.5) * u, born: now, life: 150 + Math.random() * 400, c: Math.random() < 0.25 ? CAPRI.green : '#ffffff' });
+    }
+    // 큰 번개만 소리 (초당 최대 ~10회)
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    if (len > Math.min(W, H) * 0.3 && now - lastBoltSfx > 95) {
+      lastBoltSfx = now;
+      SFX.bolt(clamp01((x0 + x1) / 2 / W) * 1.6 - 0.8, Math.min(1.2, 0.55 + power * 0.25));
+    }
+  }
+
+  // 카프리 머리카락 같은 뾰족한 조각 (마젠타 면 + 보라 외곽선 + 흰 반짝이)
+  function spawnShard(cx, cy, k) {
+    const ang = Math.random() * Math.PI * 2;
+    const len = (80 + Math.random() * 260) * u * (0.6 + k);
+    const wid = len * (0.12 + Math.random() * 0.2);
+    const tipX = cx + Math.cos(ang) * len, tipY = cy + Math.sin(ang) * len;
+    const px = -Math.sin(ang), py = Math.cos(ang);
+    const pts = [
+      [cx + px * wid, cy + py * wid],
+      [cx + Math.cos(ang) * len * 0.55 + px * wid * 0.4, cy + Math.sin(ang) * len * 0.55 + py * wid * 0.4],
+      [tipX, tipY],
+      [cx + Math.cos(ang) * len * 0.4 - px * wid * 0.7, cy + Math.sin(ang) * len * 0.4 - py * wid * 0.7],
+      [cx - px * wid, cy - py * wid],
+    ];
+    shards.push({ pts, born: performance.now(), life: 220 + Math.random() * 380, green: Math.random() < 0.14 });
+  }
+
+  function strokePath(c, pts) {
+    c.beginPath();
+    c.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+    c.stroke();
+  }
+
+  function drawCapri(k) {
+    const ctx = fxCtx;                       // 칩·포트 위 레이어에 그림
+    ctx.clearRect(0, 0, W, H);
+    const now = performance.now();
+    const px = L.portRight * dpr, py = L.cy * dpr;
+
+    // 조각 (화면을 뒤덮는 면)
+    ctx.save();
+    for (let i = shards.length - 1; i >= 0; i--) {
+      const s = shards[i];
+      const a = (now - s.born) / s.life;
+      if (a >= 1) { shards.splice(i, 1); continue; }
+      ctx.globalAlpha = a < 0.15 ? a / 0.15 : 1 - Math.max(0, a - 0.7) / 0.3;
+      ctx.beginPath();
+      s.pts.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = s.green ? CAPRI.green : CAPRI.pink;
+      ctx.fill();
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = CAPRI.violet;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 번개
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'miter';
+    ctx.lineCap = 'round';
+    for (let i = bolts.length - 1; i >= 0; i--) {
+      const b = bolts[i];
+      const a = (now - b.born) / b.life;
+      if (a >= 1) { bolts.splice(i, 1); continue; }
+      const flick = Math.random() < 0.25 ? 0.5 : 1;
+      for (const p of b.paths) {
+        const w = p.w * u;
+        ctx.globalAlpha = 0.22 * flick * (1 - a);
+        ctx.strokeStyle = CAPRI.violet; ctx.lineWidth = w * 14; strokePath(ctx, p.pts);
+        ctx.globalAlpha = 0.6 * flick * (1 - a * 0.5);
+        ctx.strokeStyle = b.color; ctx.lineWidth = w * 5; strokePath(ctx, p.pts);
+        ctx.globalAlpha = 0.95 * flick;
+        ctx.strokeStyle = b.color === CAPRI.green ? '#d8ffe6' : CAPRI.hot; ctx.lineWidth = w * 1.6; strokePath(ctx, p.pts);
+      }
+    }
+    // 반짝이 점
+    for (let i = motes.length - 1; i >= 0; i--) {
+      const m = motes[i];
+      const a = (now - m.born) / m.life;
+      if (a >= 1) { motes.splice(i, 1); continue; }
+      ctx.globalAlpha = (1 - a) * (Math.random() < 0.3 ? 0.4 : 1);
+      ctx.fillStyle = m.c;
+      ctx.fillRect(m.x, m.y, m.s, m.s);
+    }
+    ctx.restore();
+
+    // 마젠타 기운이 포트에서 번져 화면 전체를 덮음
+    const r = Math.hypot(W, H) * (0.15 + k * 1.1);
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, `rgba(249, 3, 74, ${0.55 * k})`);
+    g.addColorStop(0.6, `rgba(143, 50, 189, ${0.35 * k})`);
+    g.addColorStop(1, 'rgba(143, 50, 189, 0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    // 끝 무렵 마젠타로 가득 참 (번쩍임 없이 부드럽게)
+    if (k > 0.7) {
+      ctx.fillStyle = `rgba(249, 3, 74, ${Math.pow((k - 0.7) / 0.3, 2) * 0.55})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function startStorm() {
+    if (mode !== 'insert') return;
+    mode = 'storm';
+    stormStart = performance.now();
+    SFX.storm(STORM_DUR);
+  }
+
+  function stormFrame(now) {
+    const k = clamp01((now - stormStart) / 1000 / STORM_DUR);
+    const px = L.portRight * dpr, py = L.cy * dpr;
+    const scale = reduceMotion ? 0.35 : 1;
+    // 초반: 포트 주변에서 튀다가 → 점점 화면 끝까지 뻗어나감
+    const rate = (0.6 + 6 * k * k) * scale;
+    let n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
+    while (n-- > 0) {
+      const fromPort = Math.random() < 1 - k * 0.6;
+      const ox = fromPort ? px : Math.random() * W;
+      const oy = fromPort ? py : (Math.random() < 0.5 ? 0 : H) * (Math.random() < 0.5 ? 1 : 0) + Math.random() * H * 0.2;
+      const reach = (0.15 + k * 1.1) * Math.hypot(W, H);
+      const ang = Math.random() * Math.PI * 2;
+      const tx = ox + Math.cos(ang) * reach * (0.4 + Math.random() * 0.6);
+      const ty = oy + Math.sin(ang) * reach * (0.4 + Math.random() * 0.6);
+      spawnBolt(ox, oy, tx, ty, 0.8 + k * 2.2 + Math.random(), Math.random() < 0.22 ? CAPRI.green : CAPRI.pink);
+    }
+    const shardRate = (0.4 + 5 * Math.pow(k, 1.6)) * scale;
+    let ns = Math.floor(shardRate) + (Math.random() < shardRate % 1 ? 1 : 0);
+    while (ns-- > 0) {
+      const near = Math.random() < 1 - k;
+      spawnShard(near ? px + (Math.random() - 0.5) * 120 * u : Math.random() * W, near ? py + (Math.random() - 0.5) * 120 * u : Math.random() * H, k);
+    }
+    // 화면 흔들림 (동작 줄이기 설정 시 없음)
+    if (!reduceMotion) {
+      const amp = (2 + 10 * k * k);
+      intro.style.transform = `translate(${(Math.random() - 0.5) * amp}px, ${(Math.random() - 0.5) * amp}px)`;
+    }
+    drawCapri(k);
+    if (k >= 1) startBlackout();
+  }
+
+  function startBlackout() {
+    mode = 'black';
+    blackStart = performance.now();
+    intro.style.transform = '';
+    stage.classList.add('is-gone');
+    fxCtx.clearRect(0, 0, W, H);
+    bolts.length = 0; shards.length = 0; motes.length = 0;
+    SFX.blackout();
+  }
+
+  function blackFrame(now) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    const t = (now - blackStart) / 1000;
+    // 꺼진 화면 속에서 마지막으로 튀는 작은 스파크
+    if (t > 0.55 && t < 0.68) {
+      if (!dyingDone) { dyingDone = true; SFX.dyingSpark(); }
+      const px = L.portRight * dpr, py = L.cy * dpr;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.random() < 0.5 ? 0.9 : 0.4;
+      ctx.strokeStyle = CAPRI.pink;
+      ctx.lineWidth = 2 * u;
+      strokePath(ctx, boltPath(px, py, px + (20 + Math.random() * 30) * u, py + (Math.random() - 0.5) * 40 * u, 0.7, 3));
+      ctx.restore();
+    }
+    if (t >= BLACK_HOLD) finish();
+  }
+
+  /* ---------- 메인 루프 ---------- */
   function frame(now) {
-    const t = (now - startTime) / 1000 + timeOffset;
-    render(t);
-    const end = skipped ? T.bgBackEnd + 0.3 : DURATION;
-    if (t >= end) { finish(); return; }
-    rafId = requestAnimationFrame(frame);
+    if (mode === 'black') {
+      blackFrame(now);
+    } else {
+      const t = (now - startTime) / 1000 + timeOffset;
+      render(Math.min(t, STAGE_AT + 30));     // 붉은 화면 배경은 계속 움직임
+      if (mode === 'intro' && t >= STAGE_AT) enterStage();
+      if (mode === 'storm') stormFrame(now);
+    }
+    if (!finished) rafId = requestAnimationFrame(frame);
   }
 
   /* ---------- 시작 / 건너뛰기 / 종료 ---------- */
   const nowT = () => (performance.now() - startTime) / 1000 + timeOffset;
-  const endT = () => (skipped ? T.bgBackEnd + 0.3 : DURATION);
+  const endT = () => 600;     // 칩을 꽂을 때까지 앰비언스 유지
 
   // 오디오가 켜져 있으면 지금 인트로 시점부터 소리를 맞춰 재생
   function syncAudio() {
-    if (!running || finished) return;
+    if (!running || finished || mode === 'storm' || mode === 'black') return;
     if (SFX.running && !audioOn) {
       audioOn = true;
       SFX.play(skipped ? Math.max(nowT(), T.outStart) : nowT(), endT());
@@ -644,6 +1012,7 @@
     audioOn = false;
     timeOffset = 0;
     blocks.length = 0;
+    resetStage();
     intro.classList.remove('is-done');
     intro.hidden = false;
     site.classList.remove('is-visible');
@@ -656,9 +1025,9 @@
     syncSound();
   }
 
-  // 클릭/키 입력 시 바로 퇴장 연출로 넘어감
+  // 클릭/키 입력 시 로고 연출을 건너뛰고 붉은 화면(칩)으로
   function skip() {
-    if (!running || finished || skipped) return;
+    if (!running || finished || skipped || mode !== 'intro') return;
     const t = nowT();
     skipped = true;
     if (t < T.outStart) timeOffset += T.outStart - t;
@@ -676,8 +1045,9 @@
     finished = true;
     running = false;
     cancelAnimationFrame(rafId);
-    SFX.stop();
+    SFX.stop(0.3);
     audioOn = false;
+    stage.hidden = true;
     site.hidden = false;
     requestAnimationFrame(() => site.classList.add('is-visible'));
     intro.classList.add('is-done');
@@ -689,9 +1059,18 @@
   intro.addEventListener('pointerdown', interact);
   window.addEventListener('keydown', (e) => {
     if (e.target === soundBtn || e.target === replayBtn) return;
-    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); interact(); }
+    if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    if (mode === 'stage') {                         // 칩 스테이지: Enter/Space로 칩 꽂기
+      if (e.key !== 'Escape') { SFX.unlock().then(syncAudio); insertChip(); }
+      return;
+    }
+    if (mode === 'intro') interact();
   });
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', () => {
+    resize();
+    if (mode === 'stage') { layoutStage(); chipPos = { x: L.startX, y: L.startY, rot: -6 }; placeChip(); }
+  });
   replayBtn.addEventListener('click', () => { SFX.unlock(); start(); });
   SFX.onReady(syncAudio);   // 어떤 경로로든 오디오가 켜지면 바로 맞춰 재생
 

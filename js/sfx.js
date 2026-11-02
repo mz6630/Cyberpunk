@@ -25,7 +25,13 @@
   10.77 – 10.93 전원 차단: 험과 버즈가 함께 꺼짐
   10.93 – 11.00 정적
   11.00 – 11.50 배경 재점등: 릴레이 딸깍 + 형광등 깜빡임 + 험 스웰
-  11.50 – 끝     낮은 험 + 데이터 잡음 + 가끔 튀는 정전기 → 페이드아웃
+  11.50 – 칩 대기: 낮은 험 + 데이터 잡음 + 가끔 튀는 정전기 (칩을 꽂을 때까지 계속)
+   [칩]
+   insert()   칩이 미끄러져 들어가 딸깍, 핸드셰이크 데이터음
+   storm(d)   붉은 전기 폭풍 바닥 소리 (점점 커짐)
+   bolt(pan)  번개 한 줄기 (화면 번개와 동시에)
+   blackout() 정전: 모든 소리 차단 + '툭'
+   dyingSpark() 암전 속 마지막 작은 스파크
 
    사용: IntroSFX.unlock()  → Promise<boolean>
          IntroSFX.play(fromT, endT) / stop() / setMuted(bool) / onReady(fn)
@@ -433,15 +439,128 @@
       { at: 10.77, fn: (t) => powerDown(t, 0.16) },
       // 10.93–11.00 정적
       { at: 11.00, fn: (t) => { relay(t); flicker(t + 0.03, t + 0.5, 81); crackle(t + 0.02, t + 0.45, 0.25, 82, 0.5, (u) => 1 - u); } },
-      { at: 11.00, fn: (t, from) => {
-        const t0 = Math.max(11, from);
-        const len = Math.max(0.8, endT - t0);
-        const out = Math.min(1.5, len * 0.4);
-        hum(t, t + len, 0.05, { fadeIn: 0.5, fadeOut: out });
-        chatter(t + 0.6, t + len - out, 91, 1);
-        crackle(t + 0.6, t + len - out, 0.03, 71, 0.3);
-      } },
+      // 붉은 화면(칩 대기)부터는 칩을 꽂을 때까지 끝없이 이어지는 앰비언스
+      { at: 11.00, fn: (t, from) => idle(t, from > 11.2 ? 0.4 : 0.5) },
     ];
+  }
+
+  /* ---------- 칩 대기 앰비언스 (끝 시간 없음) ---------- */
+  let idleTimer = 0;
+  function idle(t, fadeIn = 0.5) {
+    const sess = session;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(SILENT, t);
+    g.gain.exponentialRampToValueAtTime(1, t + fadeIn);
+    g.connect(sess);
+    // 험: 정지 시간 없이 계속 (세션이 끊기면 같이 사라짐)
+    const ws = shaper(curveSoft);
+    const lp = filter('lowpass', 400, 1.5);
+    const hg = ctx.createGain();
+    hg.gain.value = 0.05 * 0.6;
+    [[60, 'sawtooth', 0.5], [60.4, 'sawtooth', 0.4], [120, 'triangle', 0.35]].forEach(([hz, type, v]) => {
+      const o = ctx.createOscillator();
+      o.type = type; o.frequency.value = hz;
+      const og = ctx.createGain(); og.gain.value = v;
+      o.connect(og).connect(ws);
+      o.start(t);
+      idleNodes.push(o);
+    });
+    ws.connect(lp).connect(hg).connect(g);
+    // 데이터 잡음 + 가끔 튀는 정전기: 1초 앞씩 계속 예약
+    const prevSession = session;
+    let seed = 91, next = t + 0.6;
+    clearInterval(idleTimer);
+    const tickFn = () => {
+      if (session !== prevSession || !ctx) { clearInterval(idleTimer); return; }
+      const until = ctx.currentTime + 1.2;
+      while (next < until) {
+        const keep = session;
+        session = g;                       // 앰비언스 버스로 보냄
+        chatter(next, next + 1, seed++, 1);
+        if (Math.random() < 0.5) crackle(next, next + 1, 0.03, seed++, 0.3);
+        session = keep;
+        next += 1;
+      }
+    };
+    tickFn();
+    idleTimer = setInterval(tickFn, 400);
+  }
+  const idleNodes = [];
+  function stopIdle() {
+    clearInterval(idleTimer);
+    const now = ctx ? ctx.currentTime : 0;
+    idleNodes.splice(0).forEach((o) => { try { o.stop(now + 0.1); } catch (e) { /* 이미 멈춤 */ } });
+  }
+
+  /* ---------- 칩 연출용 단발 효과음 ---------- */
+  function ensureSession() {
+    if (!ctx || ctx.state !== 'running') return false;
+    if (!session) {
+      session = ctx.createGain();
+      session.connect(comp);
+    }
+    return true;
+  }
+
+  // 칩이 포트에 들어감: 미끄러지는 소리 → 딸깍 → 핸드셰이크 데이터음
+  function insert() {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.01;
+    noise(t, 0.3, { type: 'bandpass', freq: 2400, sweepTo: 700, q: 2, gain: 0.12, attack: 0.02, release: 0.08 });
+    relay(t + 0.3, 1.2);
+    spark(t + 0.31, 0.7, -0.3);
+    for (let i = 0; i < 9; i++) {
+      noise(t + 0.4 + i * 0.045, 0.02, { freq: 1500 + (i % 3) * 900, q: 9, gain: 0.07, attack: 0.001, release: 0.015, pan: -0.3 });
+    }
+  }
+
+  // 붉은 전기 폭풍의 바닥 소리 (점점 커짐)
+  function storm(dur) {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.01;
+    const up = (u) => 0.25 + 0.75 * u * u;
+    arc(t, t + dur, { seed: 101, level: 1.1, freq: 60, freqTo: 140, tone: 700, toneTo: 3500, shape: up, pan: -0.4, panTo: 0.4 });
+    arc(t + 0.1, t + dur, { seed: 103, level: 0.9, freq: 115, tone: 1800, toneTo: 5000, shape: up, pan: 0.5, panTo: -0.5 });
+    crackle(t, t + dur, 1, 105, 1.1, up);
+    noise(t, dur, { type: 'lowpass', freq: 200, sweepTo: 3000, q: 1.5, gain: 0.22, attack: dur * 0.9, release: 0.05 });
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(30, t);
+    o.frequency.exponentialRampToValueAtTime(70, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(SILENT, t);
+    g.gain.exponentialRampToValueAtTime(0.45, t + dur);
+    o.connect(g).connect(session);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  // 번개 한 줄기 (화면에 큰 번개가 칠 때 바로 호출)
+  function bolt(pan = 0, level = 1) {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.005;
+    spark(t, 0.9 * level, pan);
+    arc(t, t + 0.06 + Math.random() * 0.08, { seed: Math.floor(Math.random() * 1e6), level: 0.8 * level, freq: 90 + Math.random() * 80, tone: 1500 + Math.random() * 2000, shape: (u) => 1 - u, pan });
+    if (level > 0.8) sub(t, 80, 35, 0.35, 0.25 * level, 0.2);
+  }
+
+  // 정전: 모든 소리가 한 번에 끊기고 '툭' 하는 차단음만 남음
+  function blackout() {
+    if (!ctx || ctx.state !== 'running') return;
+    stop(0.015);
+    session = ctx.createGain();
+    session.connect(comp);
+    const t = ctx.currentTime + 0.02;
+    relay(t, 1.4);
+    sub(t, 60, 22, 0.9, 0.6, 0.6);
+    noise(t, 0.12, { type: 'lowpass', freq: 600, sweepTo: 60, q: 1, gain: 0.3, release: 0.1 });
+  }
+
+  // 암전 중 마지막으로 꺼져 가는 작은 스파크
+  function dyingSpark() {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.01;
+    spark(t, 0.35, -0.4);
+    crackle(t, t + 0.12, 0.6, 333, 0.35, (u) => 1 - u, -0.4);
   }
 
   function play(fromT = 0, endT = 19) {
@@ -462,14 +581,16 @@
     return true;
   }
 
-  function stop() {
+  function stop(fade = 0.08) {
+    stopIdle();
     if (!session) return;
     const s = session;
     session = null;
     const now = ctx.currentTime;
+    s.gain.cancelScheduledValues(now);
     s.gain.setValueAtTime(s.gain.value, now);
-    s.gain.linearRampToValueAtTime(0, now + 0.08);
-    setTimeout(() => s.disconnect(), 150);
+    s.gain.linearRampToValueAtTime(0, now + fade);
+    setTimeout(() => s.disconnect(), fade * 1000 + 80);
   }
 
   function setMuted(m) {
@@ -485,6 +606,11 @@
     play,
     stop,
     setMuted,
+    insert,
+    storm,
+    bolt,
+    blackout,
+    dyingSpark,
     get running() { return !!ctx && ctx.state === 'running'; },
     get muted() { return muted; },
   };
