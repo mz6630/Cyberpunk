@@ -695,11 +695,9 @@
   replayBtn.addEventListener('click', () => { SFX.unlock(); start(); });
   SFX.onReady(syncAudio);   // 어떤 경로로든 오디오가 켜지면 바로 맞춰 재생
 
-  // 사운드 켜기/끄기 (소리가 막혀 있으면 'CLICK FOR SOUND' 안내)
+  // 사운드 켜기/끄기 (자동 재생이 막혀도 따로 표시하지 않고, 첫 클릭부터 소리가 남)
   function syncSound() {
-    const locked = running && !audioOn && !SFX.muted;
-    soundBtn.textContent = SFX.muted ? 'SOUND OFF' : locked ? 'CLICK FOR SOUND' : 'SOUND ON';
-    soundBtn.classList.toggle('is-locked', locked);
+    soundBtn.textContent = SFX.muted ? 'SOUND OFF' : 'SOUND ON';
     soundBtn.setAttribute('aria-pressed', String(!SFX.muted));
   }
   if (SFX.supported) {
