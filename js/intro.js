@@ -17,7 +17,7 @@
   11.00 – 11.50 붉은 배경 다시 켜짐
   11.50 – 19.00 붉은 노이즈 배경 유지 → 메인으로 전환
 
-   효과음: js/sfx.js (Web Audio 합성, 시작 화면 클릭 후 재생)
+   효과음: js/sfx.js (Web Audio 합성, 자동 재생 시도 → 막히면 첫 클릭부터 이어서 재생)
    로고 이미지: assets/logo.png (영상에서 추출한 'Cyberpunk' 글자, 투명 배경)
    아래 줄 'WEBSITE'는 SUB 설정으로 캔버스에 직접 그립니다 (Barlow Condensed).
    ========================================================= */
@@ -61,10 +61,8 @@
   const ctx = canvas.getContext('2d');
   const site = document.getElementById('site');
   const replayBtn = document.getElementById('replay');
-  const gate = document.getElementById('gate');
-  const jackInBtn = document.getElementById('jackin');
   const soundBtn = document.getElementById('sound');
-  const SFX = window.IntroSFX || { supported: false, unlock: () => Promise.resolve(false), play() {}, stop() {}, setMuted() {}, muted: true };
+  const SFX = window.IntroSFX || { supported: false, running: false, unlock: () => Promise.resolve(false), onReady() {}, play() {}, stop() {}, setMuted() {}, muted: true };
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let W = 0, H = 0, dpr = 1, u = 1;          // u = 1080p 기준 단위
@@ -74,8 +72,8 @@
   let timeOffset = 0;
   let skipped = false;
   let finished = false;
-  let running = false;     // 인트로 재생 중 (시작 화면에서는 false)
-  let gateOpen = false;
+  let running = false;     // 인트로 재생 중
+  let audioOn = false;     // 이번 재생에 소리가 붙었는지
   let rafId = 0;
 
   /* ---------- 유틸 ---------- */
@@ -626,30 +624,24 @@
   }
 
   /* ---------- 시작 / 건너뛰기 / 종료 ---------- */
-  /* ---------- 시작 화면 (브라우저는 클릭 전에는 소리를 막으므로 한 번 거침) ---------- */
-  function idle() {
-    drawBackground(0.55);
-    rafId = requestAnimationFrame(idle);
-  }
+  const nowT = () => (performance.now() - startTime) / 1000 + timeOffset;
+  const endT = () => (skipped ? T.bgBackEnd + 0.3 : DURATION);
 
-  function showGate() {
-    gateOpen = true;
-    gate.hidden = false;
-    cancelAnimationFrame(rafId);
-    rafId = requestAnimationFrame(idle);
-  }
-
-  function jackIn() {
-    if (!gateOpen) return;
-    gateOpen = false;
-    gate.hidden = true;
-    SFX.unlock().finally(start);   // 클릭 이벤트 안에서 오디오를 깨움
+  // 오디오가 켜져 있으면 지금 인트로 시점부터 소리를 맞춰 재생
+  function syncAudio() {
+    if (!running || finished) return;
+    if (SFX.running && !audioOn) {
+      audioOn = true;
+      SFX.play(skipped ? Math.max(nowT(), T.outStart) : nowT(), endT());
+      syncSound();
+    }
   }
 
   function start() {
     running = true;
     finished = false;
     skipped = false;
+    audioOn = false;
     timeOffset = 0;
     blocks.length = 0;
     intro.classList.remove('is-done');
@@ -659,16 +651,24 @@
     startTime = performance.now();
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(frame);
-    SFX.play(0, DURATION);
+    // 클릭 없이도 소리를 켜 본다. 브라우저가 막으면 첫 클릭 때 이어서 재생
+    SFX.unlock().then(syncAudio);
+    syncSound();
   }
 
   // 클릭/키 입력 시 바로 퇴장 연출로 넘어감
   function skip() {
     if (!running || finished || skipped) return;
-    const t = (performance.now() - startTime) / 1000 + timeOffset;
+    const t = nowT();
     skipped = true;
     if (t < T.outStart) timeOffset += T.outStart - t;
-    SFX.play(Math.max(t, T.outStart), T.bgBackEnd + 0.3);
+    if (audioOn) SFX.play(Math.max(t, T.outStart), endT());
+  }
+
+  // 소리가 막혀 있을 때의 첫 클릭/키는 '소리 켜기'로만 쓰고 건너뛰지 않음
+  function interact() {
+    if (audioOn || !SFX.supported || SFX.muted) { skip(); return; }
+    SFX.unlock().then((ok) => { if (ok) syncAudio(); else skip(); });
   }
 
   function finish() {
@@ -677,34 +677,42 @@
     running = false;
     cancelAnimationFrame(rafId);
     SFX.stop();
+    audioOn = false;
     site.hidden = false;
     requestAnimationFrame(() => site.classList.add('is-visible'));
     intro.classList.add('is-done');
     setTimeout(() => { if (finished) intro.hidden = true; }, 850);
+    syncSound();
     document.dispatchEvent(new CustomEvent('intro:done'));
   }
 
-  intro.addEventListener('click', (e) => { if (!gate.contains(e.target)) skip(); });
-  jackInBtn.addEventListener('click', jackIn);
+  intro.addEventListener('pointerdown', interact);
   window.addEventListener('keydown', (e) => {
     if (e.target === soundBtn || e.target === replayBtn) return;
-    if (gateOpen && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); jackIn(); return; }
-    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') skip();
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); interact(); }
   });
-  window.addEventListener('resize', () => { resize(); if (gateOpen) drawBackground(0.55); });
-  replayBtn.addEventListener('click', () => { SFX.unlock().finally(start); });
+  window.addEventListener('resize', resize);
+  replayBtn.addEventListener('click', () => { SFX.unlock(); start(); });
+  SFX.onReady(syncAudio);   // 어떤 경로로든 오디오가 켜지면 바로 맞춰 재생
 
-  // 사운드 켜기/끄기
+  // 사운드 켜기/끄기 (소리가 막혀 있으면 'CLICK FOR SOUND' 안내)
   function syncSound() {
-    soundBtn.textContent = SFX.muted ? 'SOUND OFF' : 'SOUND ON';
+    const locked = running && !audioOn && !SFX.muted;
+    soundBtn.textContent = SFX.muted ? 'SOUND OFF' : locked ? 'CLICK FOR SOUND' : 'SOUND ON';
+    soundBtn.classList.toggle('is-locked', locked);
     soundBtn.setAttribute('aria-pressed', String(!SFX.muted));
   }
   if (SFX.supported) {
     soundBtn.hidden = false;
+    soundBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     soundBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      SFX.unlock();
+      if (running && !audioOn && !SFX.muted) {      // 막혀 있던 소리 켜기
+        SFX.unlock().then(syncAudio);
+        return;
+      }
       SFX.setMuted(!SFX.muted);
+      if (!SFX.muted) SFX.unlock().then(syncAudio);
       syncSound();
     });
     syncSound();
@@ -723,11 +731,11 @@
     : Promise.resolve();
 
   const img = new Image();
-  img.onload = () => { fontReady.then(() => { buildLogo(img); showGate(); }); };
+  img.onload = () => { fontReady.then(() => { buildLogo(img); start(); }); };
   img.onerror = () => {
     console.info('[intro] assets/logo.png 를 불러오지 못해 임시 워드마크로 재생합니다.');
     const ready = document.fonts ? document.fonts.load('italic 700 250px Rajdhani') : Promise.resolve();
-    ready.catch(() => {}).finally(() => { buildPlaceholderLogo(); showGate(); });
+    ready.catch(() => {}).finally(() => { buildPlaceholderLogo(); start(); });
   };
   img.src = LOGO_SRC;
 })();
