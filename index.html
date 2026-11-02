@@ -13,7 +13,15 @@
   <!-- INTRO : 영상(intro.mp4) 타이밍을 그대로 재현한 캔버스 인트로 -->
   <div id="intro" aria-label="인트로">
     <canvas id="intro-canvas"></canvas>
+    <!-- 시작 화면: 브라우저 정책상 클릭이 있어야 소리를 낼 수 있음 -->
+    <div id="gate" hidden>
+      <p class="gate-eyebrow">SYS://NEURAL_LINK_READY</p>
+      <button id="jackin" type="button">CLICK TO JACK IN</button>
+      <p class="gate-note">사운드와 함께 재생됩니다 · Enter</p>
+    </div>
   </div>
+
+  <button id="sound" type="button" aria-pressed="true" hidden>SOUND ON</button>
 
   <!-- 인트로가 끝나면 나타나는 메인 영역 (허브는 다음 단계에서 제작) -->
   <main id="site" hidden>
@@ -23,6 +31,7 @@
     <button id="replay" type="button">인트로 다시 보기</button>
   </main>
 
+  <script src="js/sfx.js"></script>
   <script src="js/intro.js"></script>
 </body>
 </html>
