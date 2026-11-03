@@ -38,13 +38,17 @@
 
   <!-- 인트로가 끝나면 나타나는 메인 영역 (허브는 다음 단계에서 제작) -->
   <main id="site" hidden>
-    <p class="eyebrow">SYS://CONNECTION_ESTABLISHED</p>
-    <h1>NIGHT CITY <span>: JACK IN</span></h1>
-    <p class="sub">메인 허브 준비 중</p>
+    <!-- 칩 속 AI의 눈: 마우스를 따라 보고, 깜빡이고, 화면 밖 사용자에게 반응 -->
+    <canvas id="eyes-canvas" role="img" aria-label="칩 속에서 깨어난 AI의 두 눈. 마우스를 따라 움직입니다."></canvas>
+    <div class="site-ui">
+      <p class="eyebrow">SYS://CONNECTION_ESTABLISHED</p>
+      <h1>NIGHT CITY <span>: JACK IN</span></h1>
+    </div>
     <button id="replay" type="button">인트로 다시 보기</button>
   </main>
 
   <script src="js/sfx.js"></script>
+  <script src="js/eyes.js"></script>
   <script src="js/intro.js"></script>
 </body>
 </html>

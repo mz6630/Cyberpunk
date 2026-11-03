@@ -18,7 +18,7 @@
   11.50 – 19.00 붉은 노이즈 배경 유지 → 메인으로 전환
 
    효과음: js/sfx.js (Web Audio 합성, 자동 재생 시도 → 막히면 첫 클릭부터 이어서 재생)
-   칩 스테이지: 11.65초부터 붉은 화면에서 칩을 포트에 꽂으면 → 카프리 스파크 → 정전 → 메인
+   칩 스테이지: 11.65초부터 붉은 화면에서 칩을 포트에 꽂으면 → 카프리 스파크 → 정전(3초) → AI의 눈 (js/eyes.js)
    로고 이미지: assets/logo.png (영상에서 추출한 'Cyberpunk' 글자, 투명 배경)
    아래 줄 'WEBSITE'는 SUB 설정으로 캔버스에 직접 그립니다 (Barlow Condensed).
    ========================================================= */
@@ -642,7 +642,7 @@
   const PIN_SPAN = 0.84 - 0.205;        // 칩 높이 대비 핀 높이
   const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
   const STORM_DUR = reduceMotion ? 1.6 : 2.3;
-  const BLACK_HOLD = 1.5;
+  const BLACK_HOLD = 3.0;          // 정전 후 어둠이 이어지는 시간 → 그다음 AI의 눈
 
   let mode = 'intro';                   // intro → stage → insert → storm → black
   let L = null;                         // 레이아웃 (CSS px)
@@ -1137,6 +1137,7 @@
     timeOffset = 0;
     blocks.length = 0;
     resetStage();
+    if (window.ShardEyes) window.ShardEyes.stop();
     intro.classList.remove('is-done');
     intro.hidden = false;
     site.classList.remove('is-visible');
@@ -1174,6 +1175,7 @@
     stage.hidden = true;
     site.hidden = false;
     requestAnimationFrame(() => site.classList.add('is-visible'));
+    if (window.ShardEyes) window.ShardEyes.start(document.getElementById('eyes-canvas'));
     intro.classList.add('is-done');
     setTimeout(() => { if (finished) intro.hidden = true; }, 850);
     syncSound();

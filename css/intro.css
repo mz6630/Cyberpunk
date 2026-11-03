@@ -47,42 +47,59 @@ html, body {
   pointer-events: none;
 }
 
-/* ---------- MAIN (placeholder) ---------- */
+/* ---------- MAIN: 칩 속 AI의 눈 ---------- */
 #site {
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 24px;
-  text-align: center;
-  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 45%, var(--bg-bottom) 85%);
+  background: #000;
   opacity: 0;
-  transition: opacity 0.8s ease;
+  transition: opacity 0.3s steps(3, end);
 }
 #site.is-visible { opacity: 1; }
-
+#eyes-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#site .site-ui {
+  position: absolute;
+  left: 24px;
+  top: 20px;
+  right: 140px;
+  opacity: 0;
+  transition: opacity 0.6s steps(4, end);
+  pointer-events: none;
+}
+#site.is-awake .site-ui { opacity: 1; }
 #site .eyebrow {
   font-family: 'Rajdhani', Arial, sans-serif;
   font-weight: 700;
   letter-spacing: 0.3em;
   color: var(--cyan);
-  font-size: clamp(14px, 1.4vw, 20px);
+  font-size: clamp(11px, 1vw, 14px);
 }
 #site h1 {
+  margin-top: 4px;
   font-family: 'Rajdhani', Arial, sans-serif;
   font-weight: 700;
-  font-size: clamp(40px, 7vw, 112px);
+  font-size: clamp(22px, 2.6vw, 36px);
   line-height: 1;
   letter-spacing: 0.04em;
 }
 #site h1 span { color: var(--yellow); }
-#site .sub { color: var(--muted); font-size: clamp(15px, 1.4vw, 20px); }
+#site #replay {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.6s;
+}
+#site.is-awake #replay { opacity: 1; }
 
 #replay {
-  margin-top: 12px;
   padding: 12px 28px;
   font-family: 'Rajdhani', 'Noto Sans KR', Arial, sans-serif;
   font-size: 16px;

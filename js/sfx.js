@@ -599,6 +599,42 @@
     if (master) master.gain.setTargetAtTime(muted ? 0 : VOLUME, ctx.currentTime, 0.03);
   }
 
+  /* ---------- 광학 센서(눈) 사운드 ---------- */
+  // 렌즈가 켜짐: 형광등처럼 깜빡이는 버즈 + 딸깍
+  function eyeBoot() {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.01;
+    flicker(t, t + 0.7, 515);
+    relay(t + 0.72, 0.6);
+    noise(t + 0.75, 0.5, { freq: 900, sweepTo: 3200, q: 4, gain: 0.05, attack: 0.1, release: 0.2 });
+  }
+  // 셔터 눈꺼풀: 아주 짧은 기계음 (닫힘/열림)
+  function shutter(level = 1, pan = 0) {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.005;
+    noise(t, 0.018, { type: 'bandpass', freq: 4200, q: 6, gain: 0.07 * level, attack: 0.001, release: 0.015, pan });
+    noise(t + 0.01, 0.03, { type: 'bandpass', freq: 1400, q: 3, gain: 0.04 * level, attack: 0.002, release: 0.025, pan });
+  }
+  // 조리개/초점 서보음: 작게 '위잉'
+  function servo(up = true, level = 1) {
+    if (!ensureSession()) return;
+    const t = ctx.currentTime + 0.005;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(up ? 520 : 900, t);
+    o.frequency.exponentialRampToValueAtTime(up ? 900 : 480, t + 0.12);
+    const g = ctx.createGain();
+    env(g, t, 0.025 * level, 0.01, 0.06, 0.06);
+    const bp = filter('bandpass', 1200, 1.2);
+    o.connect(bp).connect(g).connect(session);
+    o.start(t); o.stop(t + 0.16);
+  }
+  // 눈이 떠 있는 동안 깔리는 아주 낮은 험
+  function eyeHum() {
+    if (!ensureSession()) return;
+    idle(ctx.currentTime + 0.02, 1.2);
+  }
+
   window.IntroSFX = {
     supported: !!AC,
     unlock,
@@ -611,6 +647,10 @@
     bolt,
     blackout,
     dyingSpark,
+    eyeBoot,
+    shutter,
+    servo,
+    eyeHum,
     get running() { return !!ctx && ctx.state === 'running'; },
     get muted() { return muted; },
   };
