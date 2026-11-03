@@ -105,6 +105,7 @@
     canvas.height = H;
     const fx = document.getElementById('fx-canvas');
     if (fx) { fx.width = W; fx.height = H; }
+    if (typeof glitterReset === 'function') glitterReset();
     u = Math.min(H / 1080, W / 1920 * 1.4);
     bgLayer = buildBackground();
   }
@@ -634,12 +635,13 @@
   const fxCanvas = document.getElementById('fx-canvas');
   const fxCtx = fxCanvas.getContext('2d');
 
-  const CAPRI = { pink: '#f9034a', green: '#12f870', violet: '#8f32bd', hot: '#ffd6e2' };
+  // 레퍼런스 이미지 9장에서 추출한 카프리 색
+  const CAPRI = { pink: '#ef0751', green: '#17ee7f', violet: '#8732c4', light: '#fb8295', black: '#07060d' };
   const CHIP_RATIO = 235 / 1100;        // assets/chip.png 세로/가로
   const PIN_CY = 0.522;                 // 칩 높이 대비 핀 중심
   const PIN_SPAN = 0.84 - 0.205;        // 칩 높이 대비 핀 높이
   const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
-  const STORM_DUR = reduceMotion ? 1.2 : 1.9;
+  const STORM_DUR = reduceMotion ? 1.6 : 2.3;
   const BLACK_HOLD = 1.5;
 
   let mode = 'intro';                   // intro → stage → insert → storm → black
@@ -649,10 +651,6 @@
   let stormStart = 0;
   let blackStart = 0;
   let dyingDone = false;
-  const bolts = [];
-  const shards = [];
-  const motes = [];
-  let lastBoltSfx = 0;
 
   function layoutStage() {
     const vw = window.innerWidth, vh = window.innerHeight;
@@ -688,7 +686,7 @@
     port.className = '';
     portStatus.textContent = 'SLOT 01 // AWAITING SHARD';
     intro.style.transform = '';
-    bolts.length = 0; shards.length = 0; motes.length = 0;
+    fxShapes = [];
     dyingDone = false;
     fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
   }
@@ -769,182 +767,308 @@
     });
   }
 
-  /* ---------- 카프리 스파크 ---------- */
-  // 들쭉날쭉한 번개 경로 (중간점 변위)
-  function boltPath(x0, y0, x1, y1, rough, iters) {
-    let pts = [[x0, y0], [x1, y1]];
-    for (let i = 0; i < iters; i++) {
-      const next = [pts[0]];
-      for (let j = 1; j < pts.length; j++) {
-        const [ax, ay] = pts[j - 1], [bx, by] = pts[j];
-        const len = Math.hypot(bx - ax, by - ay);
-        const off = (Math.random() - 0.5) * len * rough;
-        const nx = -(by - ay) / (len || 1), ny = (bx - ax) / (len || 1);
-        next.push([(ax + bx) / 2 + nx * off, (ay + by) / 2 + ny * off], [bx, by]);
+  /* ---------- 카프리 스파크 ----------
+     레퍼런스 분석으로 정한 규칙
+     1. 빛번짐 없는 평면 색면 (셀 애니메이션 느낌)
+     2. 큰 마젠타 덩어리에는 촘촘한 흰 글리터, 가는 가지에는 드문 글리터
+     3. 테두리 대신 한쪽(오른쪽 아래)으로만 밀린 보라색 그림자
+     4. 뾰족한 머리카락 덩어리 · 날카롭게 꺾이는 가지 · Z자 번개
+        · 2~3개씩 묶인 형광 연두 칼날 · 검은 가시 · 둥근 점 · 연분홍 지그재그 선
+     5. 12fps로 끊어 움직이고(스텝), 생길 때 2~3단계로 '팍' 커지며, 가장자리가 미세하게 떨림
+     ---------------------------------- */
+  const STEP_MS = 1000 / 12;
+  let fxShapes = [];
+  let lastStep = -1;
+  let glitterDense = null;
+  let glitterSparse = null;
+  let whiteUntil = -1;
+
+  function makeGlitter(density) {
+    const s = Math.round(240 * Math.max(1, dpr * 0.75));
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    g.fillStyle = CAPRI.pink;
+    g.fillRect(0, 0, s, s);
+    const k = s / 240;
+    if (density === 'dense') {
+      // 촘촘하게 엉긴 반짝이 (머리카락 덩어리)
+      for (let i = 0; i < 1500; i++) {
+        g.fillStyle = Math.random() < 0.2 ? CAPRI.light : `rgba(255, 238, 245, ${0.35 + Math.random() * 0.6})`;
+        const r = (0.6 + Math.random() * 1.6) * k;
+        g.beginPath(); g.arc(Math.random() * s, Math.random() * s, r, 0, Math.PI * 2); g.fill();
       }
-      pts = next;
+    } else {
+      // 드문드문 흰 점 (가는 가지)
+      for (let i = 0; i < 140; i++) {
+        g.fillStyle = `rgba(255, 245, 250, ${0.5 + Math.random() * 0.5})`;
+        const r = (0.5 + Math.random() * 1.3) * k;
+        g.beginPath(); g.arc(Math.random() * s, Math.random() * s, r, 0, Math.PI * 2); g.fill();
+      }
     }
+    return fxCtx.createPattern(c, 'repeat');
+  }
+
+  function glitterReset() { glitterDense = null; glitterSparse = null; }
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  // A→B를 n번 꺾는 Z자 경로
+  function zig(x0, y0, x1, y1, n, amp) {
+    const pts = [[x0, y0]];
+    const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const nx = -(y1 - y0) / len, ny = (x1 - x0) / len;
+    let sign = Math.random() < 0.5 ? 1 : -1;
+    for (let j = 1; j < n; j++) {
+      const t = j / n + rnd(-0.08, 0.08) / n;
+      const off = sign * amp * rnd(0.4, 1);
+      pts.push([x0 + (x1 - x0) * t + nx * off, y0 + (y1 - y0) * t + ny * off]);
+      sign = -sign;
+    }
+    pts.push([x1, y1]);
     return pts;
   }
 
-  function spawnBolt(x0, y0, x1, y1, power, color) {
-    const now = performance.now();
-    const main = boltPath(x0, y0, x1, y1, 0.55, 6);
-    const paths = [{ pts: main, w: power }];
-    // 가지
-    const nBranch = 1 + Math.floor(Math.random() * 3 * power);
-    for (let i = 0; i < nBranch; i++) {
-      const p = main[Math.floor(Math.random() * (main.length - 2)) + 1];
-      const ang = Math.atan2(y1 - y0, x1 - x0) + (Math.random() - 0.5) * 2.2;
-      const len = Math.hypot(x1 - x0, y1 - y0) * (0.15 + Math.random() * 0.35);
-      paths.push({ pts: boltPath(p[0], p[1], p[0] + Math.cos(ang) * len, p[1] + Math.sin(ang) * len, 0.6, 4), w: power * 0.5 });
+  // 경로를 두께가 줄어드는 면으로
+  function ribbon(pts, w0, w1) {
+    const left = [], right = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+      const w = (w0 + (w1 - w0) * (i / (pts.length - 1))) / 2;
+      left.push([pts[i][0] + nx * w, pts[i][1] + ny * w]);
+      right.push([pts[i][0] - nx * w, pts[i][1] - ny * w]);
     }
-    bolts.push({ paths, born: now, life: 70 + Math.random() * 120, color });
-    // 끝에서 튀는 반짝이 점
-    for (let i = 0; i < 6 * power; i++) {
-      motes.push({ x: x1 + (Math.random() - 0.5) * 60 * u, y: y1 + (Math.random() - 0.5) * 60 * u, s: (1 + Math.random() * 2.5) * u, born: now, life: 150 + Math.random() * 400, c: Math.random() < 0.25 ? CAPRI.green : '#ffffff' });
-    }
-    // 큰 번개만 소리 (초당 최대 ~10회)
-    const len = Math.hypot(x1 - x0, y1 - y0);
-    if (len > Math.min(W, H) * 0.3 && now - lastBoltSfx > 95) {
-      lastBoltSfx = now;
-      SFX.bolt(clamp01((x0 + x1) / 2 / W) * 1.6 - 0.8, Math.min(1.2, 0.55 + power * 0.25));
-    }
+    return left.concat(right.reverse());
   }
 
-  // 카프리 머리카락 같은 뾰족한 조각 (마젠타 면 + 보라 외곽선 + 흰 반짝이)
-  function spawnShard(cx, cy, k) {
-    const ang = Math.random() * Math.PI * 2;
-    const len = (80 + Math.random() * 260) * u * (0.6 + k);
-    const wid = len * (0.12 + Math.random() * 0.2);
-    const tipX = cx + Math.cos(ang) * len, tipY = cy + Math.sin(ang) * len;
-    const px = -Math.sin(ang), py = Math.cos(ang);
-    const pts = [
-      [cx + px * wid, cy + py * wid],
-      [cx + Math.cos(ang) * len * 0.55 + px * wid * 0.4, cy + Math.sin(ang) * len * 0.55 + py * wid * 0.4],
-      [tipX, tipY],
-      [cx + Math.cos(ang) * len * 0.4 - px * wid * 0.7, cy + Math.sin(ang) * len * 0.4 - py * wid * 0.7],
-      [cx - px * wid, cy - py * wid],
-    ];
-    shards.push({ pts, born: performance.now(), life: 220 + Math.random() * 380, green: Math.random() < 0.14 });
-  }
-
-  function strokePath(c, pts) {
-    c.beginPath();
-    c.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
-    c.stroke();
-  }
-
-  function drawCapri(k) {
-    const ctx = fxCtx;                       // 칩·포트 위 레이어에 그림
-    ctx.clearRect(0, 0, W, H);
-    const now = performance.now();
-    const px = L.portRight * dpr, py = L.cy * dpr;
-
-    // 조각 (화면을 뒤덮는 면)
-    ctx.save();
-    for (let i = shards.length - 1; i >= 0; i--) {
-      const s = shards[i];
-      const a = (now - s.born) / s.life;
-      if (a >= 1) { shards.splice(i, 1); continue; }
-      ctx.globalAlpha = a < 0.15 ? a / 0.15 : 1 - Math.max(0, a - 0.7) / 0.3;
-      ctx.beginPath();
-      s.pts.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
-      ctx.fillStyle = s.green ? CAPRI.green : CAPRI.pink;
-      ctx.fill();
-      ctx.lineWidth = 3 * u;
-      ctx.strokeStyle = CAPRI.violet;
-      ctx.stroke();
+  // 머리카락 덩어리: 밑동이 넓은 커다란 삼각 칼날 여러 장이 한 방향(dir)으로 부채꼴로 솟음
+  //  (각 칼날 한쪽 변에 톱니). 여러 장이 겹치면서 사이사이 보라 그림자 줄이 생김
+  function spikyMass(cx, cy, R, dir) {
+    const polys = [];
+    const at = (x, y, a, r) => [x + Math.cos(a) * r, y + Math.sin(a) * r];
+    // 밑동 (찢긴 사각형)
+    const body = [];
+    for (let i = 0; i < 6; i++) body.push(at(cx, cy, dir + Math.PI / 4 + (i / 6) * Math.PI * 2 + rnd(-0.25, 0.25), R * rnd(0.3, 0.5)));
+    polys.push(body);
+    const fan = rnd(0.7, 1.2);
+    const n = Math.floor(rnd(5, 9));
+    for (let j = 0; j < n; j++) {
+      const a = dir + rnd(-fan, fan);
+      const len = R * rnd(1.1, 2.7) * (1 - Math.abs(a - dir) / (fan * 1.9));
+      const hw = len * rnd(0.11, 0.2);
+      const bx = cx + rnd(-0.25, 0.25) * R, by = cy + rnd(-0.25, 0.25) * R;
+      const nx = -Math.sin(a), ny = Math.cos(a);
+      const tip = at(bx, by, a + rnd(-0.05, 0.05), len);
+      const p1 = [bx + nx * hw, by + ny * hw], p2 = [bx - nx * hw, by - ny * hw];
+      const blade = [p1];
+      if (Math.random() < 0.65) {               // 톱니: 변 중간이 안으로 꺾였다 다시 나감
+        const t = rnd(0.45, 0.7);
+        const ex = p1[0] + (tip[0] - p1[0]) * t, ey = p1[1] + (tip[1] - p1[1]) * t;
+        blade.push([ex - nx * hw * 0.55, ey - ny * hw * 0.55]);
+        blade.push([ex + Math.cos(a) * hw * 0.5 + nx * hw * 0.15, ey + Math.sin(a) * hw * 0.5 + ny * hw * 0.15]);
+      }
+      blade.push(tip, p2);
+      polys.push(blade);
     }
-    ctx.restore();
+    return polys;
+  }
 
-    // 번개
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.lineJoin = 'miter';
-    ctx.lineCap = 'round';
-    for (let i = bolts.length - 1; i >= 0; i--) {
-      const b = bolts[i];
-      const a = (now - b.born) / b.life;
-      if (a >= 1) { bolts.splice(i, 1); continue; }
-      const flick = Math.random() < 0.25 ? 0.5 : 1;
-      for (const p of b.paths) {
-        const w = p.w * u;
-        ctx.globalAlpha = 0.22 * flick * (1 - a);
-        ctx.strokeStyle = CAPRI.violet; ctx.lineWidth = w * 14; strokePath(ctx, p.pts);
-        ctx.globalAlpha = 0.6 * flick * (1 - a * 0.5);
-        ctx.strokeStyle = b.color; ctx.lineWidth = w * 5; strokePath(ctx, p.pts);
-        ctx.globalAlpha = 0.95 * flick;
-        ctx.strokeStyle = b.color === CAPRI.green ? '#d8ffe6' : CAPRI.hot; ctx.lineWidth = w * 1.6; strokePath(ctx, p.pts);
+  // 날카롭게 꺾이는 굵은 가지 + 꺾인 곳의 가시
+  function branchPolys(x0, y0, x1, y1, w) {
+    const path = zig(x0, y0, x1, y1, Math.floor(rnd(3, 6)), Math.hypot(x1 - x0, y1 - y0) * 0.12);
+    const polys = [ribbon(path, w, w * 0.25)];
+    for (let i = 1; i < path.length - 1; i++) {
+      if (Math.random() < 0.7) {
+        const [px, py] = path[i];
+        const a = Math.atan2(path[i + 1][1] - py, path[i + 1][0] - px) + (Math.random() < 0.5 ? 1 : -1) * rnd(0.6, 1.3);
+        const l = w * rnd(1.2, 3);
+        polys.push([[px + Math.cos(a + 1.57) * w * 0.3, py + Math.sin(a + 1.57) * w * 0.3], [px + Math.cos(a) * l, py + Math.sin(a) * l], [px - Math.cos(a + 1.57) * w * 0.3, py - Math.sin(a + 1.57) * w * 0.3]]);
       }
     }
-    // 반짝이 점
-    for (let i = motes.length - 1; i >= 0; i--) {
-      const m = motes[i];
-      const a = (now - m.born) / m.life;
-      if (a >= 1) { motes.splice(i, 1); continue; }
-      ctx.globalAlpha = (1 - a) * (Math.random() < 0.3 ? 0.4 : 1);
-      ctx.fillStyle = m.c;
-      ctx.fillRect(m.x, m.y, m.s, m.s);
-    }
-    ctx.restore();
+    return polys;
+  }
 
-    // 마젠타 기운이 포트에서 번져 화면 전체를 덮음
-    const r = Math.hypot(W, H) * (0.15 + k * 1.1);
-    const g = ctx.createRadialGradient(px, py, 0, px, py, r);
-    g.addColorStop(0, `rgba(249, 3, 74, ${0.55 * k})`);
-    g.addColorStop(0.6, `rgba(143, 50, 189, ${0.35 * k})`);
-    g.addColorStop(1, 'rgba(143, 50, 189, 0)');
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-    // 끝 무렵 마젠타로 가득 참 (번쩍임 없이 부드럽게)
-    if (k > 0.7) {
-      ctx.fillStyle = `rgba(249, 3, 74, ${Math.pow((k - 0.7) / 0.3, 2) * 0.55})`;
-      ctx.fillRect(0, 0, W, H);
+  // 2~3개씩 나란한 형광 연두 칼날
+  function bladePolys(x, y, ang, len, w) {
+    const polys = [];
+    const n = Math.random() < 0.5 ? 2 : 3;
+    const nx = -Math.sin(ang), ny = Math.cos(ang);
+    for (let i = 0; i < n; i++) {
+      const o = (i - (n - 1) / 2) * w * rnd(1.6, 2.4);
+      const l = len * rnd(0.6, 1);
+      const bx = x + nx * o + Math.cos(ang) * rnd(0, len * 0.2), by = y + ny * o + Math.sin(ang) * rnd(0, len * 0.2);
+      polys.push([[bx + nx * w / 2, by + ny * w / 2], [bx + Math.cos(ang) * l, by + Math.sin(ang) * l], [bx - nx * w / 2, by - ny * w / 2], [bx - Math.cos(ang) * l * 0.12, by - Math.sin(ang) * l * 0.12]]);
     }
+    return polys;
+  }
+
+  function spikePoly(x, y, ang, len, w) {
+    const nx = -Math.sin(ang), ny = Math.cos(ang);
+    return [[x + nx * w / 2, y + ny * w / 2], [x + Math.cos(ang) * len, y + Math.sin(ang) * len], [x - nx * w / 2, y - ny * w / 2]];
+  }
+
+  function addShape(s, step) {
+    s.born = step;
+    fxShapes.push(s);
+  }
+
+  function polyPath(c, poly, ox, oy, s, jx, jy) {
+    c.beginPath();
+    for (let i = 0; i < poly.length; i++) {
+      const x = ox + (poly[i][0] - ox) * s + jx, y = oy + (poly[i][1] - oy) * s + jy;
+      if (i) c.lineTo(x, y); else c.moveTo(x, y);
+    }
+    c.closePath();
+  }
+
+  // 한 스텝 그리기
+  function drawFx(step, k) {
+    const c = fxCtx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, W, H);
+    if (!glitterDense) { glitterDense = makeGlitter('dense'); glitterSparse = makeGlitter('sparse'); }
+    const sh = { x: 3.5 * u, y: 4.5 * u };     // 보라 그림자 방향
+    const boil = 1.2 * u;
+
+    if (step <= whiteUntil) {                  // 임팩트 프레임 (흰 화면)
+      c.fillStyle = '#fff4f7';
+      c.fillRect(0, 0, W, H);
+    }
+    if (k > 0.86) {                            // 마지막: 글리터 마젠타가 화면 전체를 덮음
+      c.fillStyle = glitterDense;
+      c.fillRect(0, 0, W, H);
+    }
+
+    for (let i = fxShapes.length - 1; i >= 0; i--) {
+      if (fxShapes[i].life && step - fxShapes[i].born >= fxShapes[i].life) fxShapes.splice(i, 1);
+    }
+    for (const s of fxShapes) {
+      const age = step - s.born;
+      const sc = s.grow ? (age === 0 ? 0.55 : age === 1 ? 0.85 : 1) : 1;   // 2~3단계로 팍 커짐
+      const jx = (Math.random() - 0.5) * boil, jy = (Math.random() - 0.5) * boil;
+      const ox = s.ox ?? 0, oy = s.oy ?? 0;
+      for (const poly of s.polys) {
+        if (s.shadow !== false) {
+          polyPath(c, poly, ox, oy, sc, jx + sh.x, jy + sh.y);
+          c.fillStyle = CAPRI.violet;
+          c.fill();
+        }
+        polyPath(c, poly, ox, oy, sc, jx, jy);
+        c.fillStyle = s.fill === 'dense' ? glitterDense : s.fill === 'sparse' ? glitterSparse : s.fill;
+        c.fill();
+      }
+      if (s.dots) {
+        for (const d of s.dots) {
+          c.fillStyle = d.c;
+          c.beginPath(); c.arc(d.x + jx, d.y + jy, d.r, 0, Math.PI * 2); c.fill();
+        }
+      }
+      if (s.line) {
+        c.strokeStyle = CAPRI.light;
+        c.lineWidth = 2 * u;
+        c.lineJoin = 'miter';
+        c.beginPath();
+        s.line.forEach(([x, y], i) => (i ? c.lineTo(x + jx, y + jy) : c.moveTo(x + jx, y + jy)));
+        c.stroke();
+      }
+    }
+  }
+
+  // 한 스텝마다 새 모양을 만든다
+  function spawnStep(step, k) {
+    const px = L.portRight * dpr, py = L.cy * dpr;
+    const diag = Math.hypot(W, H);
+    const m = reduceMotion ? 0.45 : 1;
+    const times = (x) => { const n = x * m; return Math.floor(n) + (Math.random() < n % 1 ? 1 : 0); };
+    const out = () => rnd(-Math.PI, Math.PI);
+    let loud = 0;
+
+    // ① 깨어남: 포트에서 칼날·점·작은 가시가 튐
+    if (k < 0.2) {
+      for (let i = 0; i < times(1.5); i++) {
+        const a = out();
+        addShape({ polys: bladePolys(px + rnd(-20, 20) * u, py + rnd(-20, 20) * u, a, rnd(50, 130) * u, rnd(5, 9) * u), fill: CAPRI.green, life: 5 }, step);
+      }
+      addShape({ polys: spikyMass(px, py, rnd(30, 55) * u, out()), fill: 'dense', grow: true, ox: px, oy: py }, step);
+      addShape({ polys: [], shadow: false, dots: Array.from({ length: 4 }, () => ({ x: px + rnd(-90, 90) * u, y: py + rnd(-70, 70) * u, r: rnd(3, 9) * u, c: Math.random() < 0.5 ? CAPRI.green : CAPRI.pink })), life: 3 }, step);
+      loud = 0.6;
+    }
+
+    // ② 분출: 포트에서 바깥으로 머리카락 덩어리와 가지가 뻗어 나감
+    if (k >= 0.12) {
+      for (let i = 0; i < times(0.8 + k * 2.6); i++) {
+        const nearPort = Math.random() < 1 - k;
+        const a = out();
+        const dist = nearPort ? diag * rnd(0.03, 0.12 + k * 0.35) : 0;
+        const cx = nearPort ? px + Math.cos(a) * dist : rnd(0, W);
+        const cy = nearPort ? py + Math.sin(a) * dist : rnd(0, H);
+        const R = rnd(50, 110 + k * 220) * u;
+        addShape({ polys: spikyMass(cx, cy, R, nearPort ? a : -Math.PI / 2 + rnd(-0.9, 0.9)), fill: 'dense', grow: true, ox: cx, oy: cy }, step);
+      }
+      for (let i = 0; i < times(0.5 + k * 1.2); i++) {
+        const a = out();
+        const len = diag * rnd(0.15, 0.25 + k * 0.4);
+        const ox = Math.random() < 0.6 ? px : rnd(0, W), oy = Math.random() < 0.6 ? py : rnd(0, H);
+        addShape({ polys: branchPolys(ox, oy, ox + Math.cos(a) * len, oy + Math.sin(a) * len, rnd(12, 26) * u), fill: 'sparse', grow: true, ox, oy }, step);
+        loud = Math.max(loud, 0.8 + k * 0.4);
+      }
+      // Z자 번개 (잠깐 번쩍) — 마젠타 / 연두 / 검정
+      for (let i = 0; i < times(1 + k * 2); i++) {
+        const x0 = rnd(0, W), y0 = rnd(0, H), a = out(), len = diag * rnd(0.1, 0.3);
+        const col = pick([CAPRI.pink, CAPRI.pink, CAPRI.green, CAPRI.black]);
+        addShape({ polys: [ribbon(zig(x0, y0, x0 + Math.cos(a) * len, y0 + Math.sin(a) * len, Math.floor(rnd(3, 6)), len * 0.18), rnd(8, 16) * u, 1.5 * u)], fill: col, life: 2 }, step);
+      }
+      // 검은 가시
+      for (let i = 0; i < times(0.6 + k * 1.5); i++) {
+        const a = out();
+        addShape({ polys: [spikePoly(rnd(0, W), rnd(0, H), a, rnd(80, 260) * u, rnd(6, 14) * u)], fill: CAPRI.black, shadow: false }, step);
+      }
+      // 연두 칼날 묶음
+      for (let i = 0; i < times(0.4 + k * 0.8); i++) {
+        addShape({ polys: bladePolys(rnd(0, W), rnd(0, H), out(), rnd(70, 200) * u, rnd(6, 11) * u), fill: CAPRI.green }, step);
+      }
+      // 연분홍 지그재그 선 (전기 테두리)
+      for (let i = 0; i < times(0.6 + k); i++) {
+        const a = out(), len = diag * rnd(0.2, 0.45);
+        const line = zig(px, py, px + Math.cos(a) * len, py + Math.sin(a) * len, Math.floor(rnd(4, 8)), len * 0.08);
+        addShape({ polys: [], shadow: false, line, life: 2 }, step);
+      }
+      // 둥근 점
+      if (Math.random() < 0.5 * m) {
+        addShape({ polys: [], shadow: false, life: 4, dots: Array.from({ length: 3 }, () => ({ x: rnd(0, W), y: rnd(0, H), r: rnd(4, 14) * u, c: Math.random() < 0.6 ? CAPRI.green : CAPRI.pink })) }, step);
+      }
+    }
+
+    // ③ 임팩트 프레임: 한가운데쯤 단 한 번 흰 화면 (동작 줄이기에선 없음)
+    if (!reduceMotion && whiteUntil < 0 && k >= 0.5) { whiteUntil = step + 1; loud = 1.3; }
+
+    if (loud > 0) SFX.bolt(clamp01(px / W) * 1.6 - 0.8 + rnd(-0.3, 0.3), Math.min(1.3, loud));
   }
 
   function startStorm() {
     if (mode !== 'insert') return;
     mode = 'storm';
     stormStart = performance.now();
+    fxShapes = [];
+    lastStep = -1;
+    whiteUntil = -1;
     SFX.storm(STORM_DUR);
   }
 
   function stormFrame(now) {
     const k = clamp01((now - stormStart) / 1000 / STORM_DUR);
-    const px = L.portRight * dpr, py = L.cy * dpr;
-    const scale = reduceMotion ? 0.35 : 1;
-    // 초반: 포트 주변에서 튀다가 → 점점 화면 끝까지 뻗어나감
-    const rate = (0.6 + 6 * k * k) * scale;
-    let n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
-    while (n-- > 0) {
-      const fromPort = Math.random() < 1 - k * 0.6;
-      const ox = fromPort ? px : Math.random() * W;
-      const oy = fromPort ? py : (Math.random() < 0.5 ? 0 : H) * (Math.random() < 0.5 ? 1 : 0) + Math.random() * H * 0.2;
-      const reach = (0.15 + k * 1.1) * Math.hypot(W, H);
-      const ang = Math.random() * Math.PI * 2;
-      const tx = ox + Math.cos(ang) * reach * (0.4 + Math.random() * 0.6);
-      const ty = oy + Math.sin(ang) * reach * (0.4 + Math.random() * 0.6);
-      spawnBolt(ox, oy, tx, ty, 0.8 + k * 2.2 + Math.random(), Math.random() < 0.22 ? CAPRI.green : CAPRI.pink);
+    const step = Math.floor((now - stormStart) / STEP_MS);
+    if (step !== lastStep) {                  // 12fps로 끊어서 갱신
+      lastStep = step;
+      if (k < 1) spawnStep(step, k);
+      drawFx(step, k);
+      if (!reduceMotion) {
+        const amp = 2 + 12 * k * k;
+        intro.style.transform = `translate(${Math.round((Math.random() - 0.5) * amp)}px, ${Math.round((Math.random() - 0.5) * amp)}px)`;
+      }
     }
-    const shardRate = (0.4 + 5 * Math.pow(k, 1.6)) * scale;
-    let ns = Math.floor(shardRate) + (Math.random() < shardRate % 1 ? 1 : 0);
-    while (ns-- > 0) {
-      const near = Math.random() < 1 - k;
-      spawnShard(near ? px + (Math.random() - 0.5) * 120 * u : Math.random() * W, near ? py + (Math.random() - 0.5) * 120 * u : Math.random() * H, k);
-    }
-    // 화면 흔들림 (동작 줄이기 설정 시 없음)
-    if (!reduceMotion) {
-      const amp = (2 + 10 * k * k);
-      intro.style.transform = `translate(${(Math.random() - 0.5) * amp}px, ${(Math.random() - 0.5) * amp}px)`;
-    }
-    drawCapri(k);
     if (k >= 1) startBlackout();
   }
 
@@ -953,8 +1077,9 @@
     blackStart = performance.now();
     intro.style.transform = '';
     stage.classList.add('is-gone');
+    fxCtx.setTransform(1, 0, 0, 1, 0, 0);
     fxCtx.clearRect(0, 0, W, H);
-    bolts.length = 0; shards.length = 0; motes.length = 0;
+    fxShapes = [];
     SFX.blackout();
   }
 
@@ -966,14 +1091,13 @@
     // 꺼진 화면 속에서 마지막으로 튀는 작은 스파크
     if (t > 0.55 && t < 0.68) {
       if (!dyingDone) { dyingDone = true; SFX.dyingSpark(); }
+      // 작은 Z자 번개 하나 (보라 그림자 포함, 평면 색)
       const px = L.portRight * dpr, py = L.cy * dpr;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.random() < 0.5 ? 0.9 : 0.4;
-      ctx.strokeStyle = CAPRI.pink;
-      ctx.lineWidth = 2 * u;
-      strokePath(ctx, boltPath(px, py, px + (20 + Math.random() * 30) * u, py + (Math.random() - 0.5) * 40 * u, 0.7, 3));
-      ctx.restore();
+      const poly = ribbon(zig(px, py, px + 46 * u, py - 18 * u, 3, 10 * u), 7 * u, 1 * u);
+      ctx.fillStyle = CAPRI.violet;
+      polyPath(ctx, poly, 0, 0, 1, 3 * u, 4 * u); ctx.fill();
+      ctx.fillStyle = CAPRI.pink;
+      polyPath(ctx, poly, 0, 0, 1, 0, 0); ctx.fill();
     }
     if (t >= BLACK_HOLD) finish();
   }
