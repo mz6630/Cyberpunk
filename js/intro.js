@@ -638,9 +638,9 @@
 
   // 레퍼런스 이미지 9장에서 추출한 카프리 색
   const CAPRI = { pink: '#ef0751', green: '#17ee7f', violet: '#8732c4', light: '#fb8295', black: '#07060d' };
-  const CHIP_RATIO = 240 / 1000;        // assets/chip.svg 세로/가로
-  const PIN_CY = 121 / 240;             // 칩 높이 대비 핀 중심
-  const PIN_SPAN = 98 / 240;            // 칩 높이 대비 핀 높이
+  const CHIP_RATIO = 220 / 1000;        // assets/chip.svg 세로/가로
+  const PIN_CY = 110 / 220;             // 칩 높이 대비 핀 중심
+  const PIN_SPAN = 100 / 220;           // 칩 높이 대비 핀 높이
   const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
   const STORM_DUR = reduceMotion ? 1.6 : 2.3;
   const BLACK_HOLD = 3.0;          // 정전 후 어둠이 이어지는 시간 → 그다음 AI의 눈
@@ -657,17 +657,17 @@
     const vw = window.innerWidth, vh = window.innerHeight;
     const portrait = vw < vh;
     // 0과 1로 된 사람 (아래쪽에 붙여 어깨가 화면 밖으로 이어지게)
-    const S = Math.min(vh * (portrait ? 0.66 : 0.9), vw * (portrait ? 1.05 : 0.58));
-    const left = vw * (portrait ? 0.46 : 0.4) - window.BinaryBody.PORT.x * S;
+    const S = Math.min(vh * (portrait ? 0.62 : 0.94), vw * (portrait ? 1.0 : 0.56));
+    const left = vw * (portrait ? 0.5 : 0.36) - 0.5 * S;            // 정면 흉상, 왼쪽에 배치
     const top = vh - S;
     const portX = left + window.BinaryBody.PORT.x * S;
     const cy = top + window.BinaryBody.PORT.y * S;
     // 칩: 정면, 핀 높이가 목 포트에 맞게
     const neck = window.BinaryBody.NECK_W * S;
-    const CW = Math.min(vw * (portrait ? 0.46 : 0.34), 480, (neck * 0.42) / (CHIP_RATIO * PIN_SPAN));
+    const CW = Math.min(vw * (portrait ? 0.44 : 0.3), 440, (neck * 0.32) / (CHIP_RATIO * PIN_SPAN));
     const CH = CW * CHIP_RATIO;
     const slotH = CH * PIN_SPAN * 1.18;
-    const depth = CW * 0.16;                       // 핀 + 헤드 일부가 목 안으로
+    const depth = CW * 0.13;                       // 핀 + 본체 끝이 목 안으로
     const startX = Math.min(portX + Math.max(70, vw * 0.1), vw - CW - 12);
     L = { vw, vh, CW, CH, cy, portRight: portX, slotH, startX, startY: cy - CH * PIN_CY, depth, body: { left, top, size: S } };
 
@@ -1166,7 +1166,8 @@
     startTime = performance.now();
     cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(frame);
-    // 클릭 없이도 소리를 켜 본다. 브라우저가 막으면 첫 클릭 때 이어서 재생
+    // 항상 소리 켜짐 (음소거 버튼 없음). 브라우저가 막으면 첫 클릭·칩 드래그 때 이어서 재생
+    if (SFX.muted) SFX.setMuted(false);
     SFX.unlock().then(syncAudio);
     syncSound();
   }
@@ -1227,7 +1228,6 @@
     soundBtn.setAttribute('aria-pressed', String(!SFX.muted));
   }
   if (SFX.supported) {
-    soundBtn.hidden = false;
     soundBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     soundBtn.addEventListener('click', (e) => {
       e.stopPropagation();

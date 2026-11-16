@@ -1,84 +1,77 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 240" width="1000" height="240">
-  <!-- DATA SHARD (오리지널 벡터 디자인, 정면) — 왼쪽 커넥터 핀이 목 포트로 들어감 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 220" width="1000" height="220">
+  <!-- DATA SHARD v2 (오리지널, 정면) — 얇은 스모크 글라스 슬래브 + 비치는 붉은 회로 -->
+  <!-- 핀 영역: y 60~160 (높이 100, 중심 110) / 왼쪽 0~92 -->
   <defs>
-    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f1f3f6"/><stop offset="0.45" stop-color="#b9c0ca"/><stop offset="1" stop-color="#7d8692"/>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1a22"/><stop offset="0.5" stop-color="#140b10"/><stop offset="1" stop-color="#0a0508"/>
     </linearGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff1b0"/><stop offset="0.5" stop-color="#e2b84a"/><stop offset="1" stop-color="#9c7419"/>
+    <linearGradient id="pcb" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4a0a16"/><stop offset="1" stop-color="#2a050c"/>
     </linearGradient>
-    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ff3a4e"/><stop offset="0.55" stop-color="#d4122c"/><stop offset="1" stop-color="#8e0718"/>
+    <linearGradient id="pin" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8f96a1"/><stop offset="0.5" stop-color="#e9edf2"/><stop offset="1" stop-color="#9aa1ac"/>
     </linearGradient>
-    <linearGradient id="grip" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#5a0d18"/><stop offset="1" stop-color="#2a050b"/>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b6370"/><stop offset="0.5" stop-color="#2a2f37"/><stop offset="1" stop-color="#15181d"/>
     </linearGradient>
-    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="0.4" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/><stop offset="0.56" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.7" stop-color="#ffffff" stop-opacity="0"/><stop offset="0.72" stop-color="#ffffff" stop-opacity="0.07"/><stop offset="0.76" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
-    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%">
-      <feGaussianBlur stdDeviation="3.5" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    <pattern id="hazard" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="16" height="16" fill="#fcee0a"/><rect width="8" height="16" fill="#111"/>
+    </pattern>
+    <filter id="glow" x="-10%" y="-60%" width="120%" height="220%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <clipPath id="bodyClip"><path d="M110 18 L930 18 L982 70 L982 150 L930 202 L110 202 L92 184 L92 36 Z"/></clipPath>
   </defs>
 
-  <!-- 커넥터 핀 (y 70~170 = 핀 영역) -->
-  <rect x="96" y="66" width="72" height="108" rx="4" fill="#1c1f25"/>
-  <g fill="url(#gold)">
-    <rect x="6" y="72" width="104" height="13" rx="3"/>
-    <rect x="6" y="94" width="104" height="13" rx="3"/>
-    <rect x="6" y="116" width="104" height="13" rx="3"/>
-    <rect x="6" y="138" width="104" height="13" rx="3"/>
-    <rect x="6" y="160" width="104" height="10" rx="3"/>
-  </g>
-  <g fill="#000" opacity="0.25">
-    <rect x="6" y="82" width="104" height="3"/><rect x="6" y="104" width="104" height="3"/><rect x="6" y="126" width="104" height="3"/><rect x="6" y="148" width="104" height="3"/>
+  <!-- 접점 핀 (가는 금속 날 8개) -->
+  <rect x="58" y="56" width="44" height="108" fill="url(#steel)"/>
+  <g fill="url(#pin)">
+    <rect x="4" y="60" width="66" height="8" rx="2"/><rect x="4" y="73" width="66" height="8" rx="2"/>
+    <rect x="4" y="86" width="66" height="8" rx="2"/><rect x="4" y="99" width="66" height="8" rx="2"/>
+    <rect x="4" y="112" width="66" height="8" rx="2"/><rect x="4" y="125" width="66" height="8" rx="2"/>
+    <rect x="4" y="138" width="66" height="8" rx="2"/><rect x="4" y="151" width="66" height="8" rx="2"/>
   </g>
 
-  <!-- 금속 헤드 -->
-  <path d="M150 34 L262 34 L276 20 L360 20 L374 34 L392 34 L392 206 L374 206 L360 220 L276 220 L262 206 L150 206 L136 192 L136 48 Z" fill="url(#metal)"/>
-  <path d="M150 34 L262 34 L276 20 L360 20 L374 34 L392 34 L392 206 L374 206 L360 220 L276 220 L262 206 L150 206 L136 192 L136 48 Z" fill="none" stroke="#5c646f" stroke-width="2"/>
-  <g fill="#5c646f"><rect x="160" y="50" width="16" height="140" rx="2" opacity="0.35"/><circle cx="318" cy="44" r="5"/><circle cx="318" cy="196" r="5"/></g>
-
-  <!-- 회로 기판 -->
-  <path d="M376 44 L742 44 L768 70 L768 170 L742 196 L376 196 Z" fill="#14060a"/>
-  <path d="M388 54 L736 54 L756 74 L756 166 L736 186 L388 186 Z" fill="url(#board)"/>
-  <!-- 기판 결 -->
-  <g stroke="#ffffff" stroke-opacity="0.06" stroke-width="1">
-    <line x1="388" y1="70" x2="756" y2="70"/><line x1="388" y1="90" x2="756" y2="90"/><line x1="388" y1="110" x2="756" y2="110"/><line x1="388" y1="130" x2="756" y2="130"/><line x1="388" y1="150" x2="756" y2="150"/><line x1="388" y1="170" x2="756" y2="170"/>
+  <!-- 본체 (스모크 글라스) -->
+  <path d="M110 18 L930 18 L982 70 L982 150 L930 202 L110 202 L92 184 L92 36 Z" fill="url(#glass)"/>
+  <g clip-path="url(#bodyClip)">
+    <!-- 안쪽 기판 -->
+    <path d="M168 42 L700 42 L724 66 L724 154 L700 178 L168 178 Z" fill="url(#pcb)"/>
+    <!-- 빛나는 회로 -->
+    <g fill="none" stroke="#ff2a4a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+      <path d="M150 110 L232 110 L252 90 L360 90 L376 74 L470 74"/>
+      <path d="M150 128 L262 128 L282 148 L420 148 L436 132 L560 132 L578 114 L700 114"/>
+      <path d="M150 92 L200 92 L216 60 L300 60"/>
+      <path d="M470 74 L520 74 L540 94 L560 94"/>
+      <path d="M420 148 L436 164 L640 164"/>
+    </g>
+    <g fill="#ffd0d8" filter="url(#glow)">
+      <circle cx="470" cy="74" r="4.5"/><circle cx="300" cy="60" r="4"/><circle cx="700" cy="114" r="4.5"/><circle cx="640" cy="164" r="4"/><circle cx="560" cy="94" r="4"/>
+    </g>
+    <!-- 코어 다이 -->
+    <rect x="588" y="58" width="64" height="64" rx="5" fill="#0b0d11" stroke="#3a3f48" stroke-width="2"/>
+    <rect x="602" y="72" width="36" height="36" rx="3" fill="#131820" stroke="#5ef6ff" stroke-opacity="0.55" stroke-width="1.5"/>
+    <circle cx="620" cy="90" r="5" fill="#5ef6ff" filter="url(#glow)"/>
+    <!-- 노란 경고 띠 -->
+    <rect x="112" y="18" width="34" height="184" fill="url(#hazard)" opacity="0.92"/>
+    <!-- 오른쪽 라벨 영역 -->
+    <rect x="752" y="44" width="180" height="2" fill="#5b6370"/>
+    <rect x="752" y="174" width="180" height="2" fill="#5b6370"/>
+    <text x="756" y="84" font-family="Consolas, Menlo, monospace" font-weight="700" font-size="30" fill="#e9edf2" letter-spacing="4">SHARD</text>
+    <text x="756" y="110" font-family="Consolas, Menlo, monospace" font-size="15" fill="#8f96a1" letter-spacing="2">0x2077-JI // NC</text>
+    <g fill="#8f96a1"><rect x="756" y="128" width="3" height="28"/><rect x="762" y="128" width="1.5" height="28"/><rect x="767" y="128" width="4" height="28"/><rect x="775" y="128" width="1.5" height="28"/><rect x="780" y="128" width="3" height="28"/><rect x="787" y="128" width="1.5" height="28"/><rect x="792" y="128" width="5" height="28"/><rect x="800" y="128" width="2" height="28"/><rect x="806" y="128" width="3" height="28"/></g>
+    <circle cx="930" cy="142" r="8" fill="#062a2e"/><circle cx="930" cy="142" r="4.5" fill="#5ef6ff" filter="url(#glow)"/>
+    <!-- 유리 반사 -->
+    <rect x="92" y="18" width="890" height="184" fill="url(#sheen)"/>
   </g>
-  <!-- 빛나는 회로선 -->
-  <g fill="none" stroke="#8dffb0" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" filter="url(#glow)">
-    <path d="M396 120 L452 120 L472 92 L540 92 L556 108 L612 108"/>
-    <path d="M396 146 L436 146 L458 168 L566 168 L586 148 L648 148 L668 128 L736 128"/>
-    <path d="M396 82 L420 82 L436 66 L512 66 L528 80 L700 80 L720 100 L740 100"/>
-  </g>
-  <g fill="#d9ffe4" filter="url(#glow)">
-    <circle cx="612" cy="108" r="6"/><circle cx="736" cy="128" r="6"/><circle cx="740" cy="100" r="5"/><circle cx="472" cy="92" r="4"/><circle cx="458" cy="168" r="4"/>
-  </g>
-  <!-- 연산 칩 -->
-  <g>
-    <g fill="#c9ced6"><rect x="626" y="138" width="4" height="8"/><rect x="638" y="138" width="4" height="8"/><rect x="650" y="138" width="4" height="8"/><rect x="662" y="138" width="4" height="8"/>
-      <rect x="626" y="58" width="4" height="8"/><rect x="638" y="58" width="4" height="8"/><rect x="650" y="58" width="4" height="8"/><rect x="662" y="58" width="4" height="8"/></g>
-    <rect x="618" y="66" width="56" height="72" rx="4" fill="#0d0f13"/>
-    <rect x="618" y="66" width="56" height="72" rx="4" fill="none" stroke="#2c313a" stroke-width="2"/>
-    <circle cx="628" cy="76" r="3" fill="#2c313a"/>
-  </g>
-  <rect x="388" y="54" width="368" height="132" fill="url(#gloss)"/>
-
-  <!-- 손잡이 -->
-  <path d="M760 40 L944 40 Q990 40 990 86 L990 154 Q990 200 944 200 L760 200 L746 186 L746 54 Z" fill="url(#grip)"/>
-  <path d="M760 40 L944 40 Q990 40 990 86 L990 154 Q990 200 944 200 L760 200 L746 186 L746 54 Z" fill="none" stroke="#120205" stroke-width="3"/>
-  <g fill="#14030a" opacity="0.9">
-    <rect x="782" y="58" width="8" height="124" rx="3"/><rect x="800" y="58" width="8" height="124" rx="3"/><rect x="818" y="58" width="8" height="124" rx="3"/><rect x="836" y="58" width="8" height="124" rx="3"/>
-  </g>
-  <g fill="#ff5a6c" opacity="0.18">
-    <rect x="782" y="58" width="3" height="124"/><rect x="800" y="58" width="3" height="124"/><rect x="818" y="58" width="3" height="124"/><rect x="836" y="58" width="3" height="124"/>
-  </g>
-  <!-- 노란 라벨 + LED -->
-  <path d="M866 60 L962 60 L970 68 L970 92 L866 92 Z" fill="#fcee0a"/>
-  <g fill="#14030a"><rect x="874" y="70" width="10" height="12"/><rect x="890" y="70" width="4" height="12"/><rect x="898" y="70" width="14" height="12"/><rect x="916" y="70" width="4" height="12"/><rect x="924" y="70" width="8" height="12"/><rect x="936" y="70" width="4" height="12"/><rect x="944" y="70" width="14" height="12"/></g>
-  <circle cx="944" cy="152" r="10" fill="#0a2a22"/>
-  <circle cx="944" cy="152" r="6" fill="#5effa8" filter="url(#glow)"/>
-  <path d="M760 40 L944 40 Q990 40 990 86 L990 100 L746 100 L746 54 Z" fill="url(#gloss)"/>
+  <!-- 테두리 베벨 -->
+  <path d="M110 18 L930 18 L982 70 L982 150 L930 202 L110 202 L92 184 L92 36 Z" fill="none" stroke="#6b737f" stroke-width="2.5"/>
+  <path d="M112 22 L928 22 L976 70" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1.5"/>
+  <!-- 손잡이 홈 -->
+  <g fill="#05030a"><path d="M846 18 L870 18 L866 30 L850 30 Z"/><path d="M880 18 L904 18 L900 30 L884 30 Z"/><path d="M846 202 L870 202 L866 190 L850 190 Z"/><path d="M880 202 L904 202 L900 190 L884 190 Z"/></g>
 </svg>

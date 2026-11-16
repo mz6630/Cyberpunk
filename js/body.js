@@ -1,87 +1,57 @@
 /* =========================================================
-   NIGHT CITY : JACK IN — BINARY BODY (ASCII 렌더러)
-   3D로 계산한 오리지널 사람 흉상(3/4 옆모습)을 ASCII 아트로 그린다.
-   - 브라우저에서 SDF 레이마칭으로 형태를 한 번 계산 (머리·얼굴·목·어깨)
-     → 셀마다 법선·오목함(AO) 저장
-   - 매 프레임 조명을 계산해 밝기 → 글자 밀도( . : - = + 1 0 8 # @ )와 색으로 변환
-   - 스캔 띠가 지나가면 그 줄은 0/1 데이터로 뒤바뀜, 가로 글리치, 배경 ASCII 비,
-     아래쪽은 시안 입자로 부서짐
-   - 목 오른쪽 뒤에 포트. 칩이 꽂히면 묻힌 부분이 연두색으로 비치고 파동이 퍼짐
+   NIGHT CITY : JACK IN — BINARY BODY (정면 ASCII 렌더러)
+   실제 사람 비율의 정면 흉상을 ASCII 아트로 그린다.
+   - 형태: MakeHuman 기본 메시(CC0)를 정면에서 렌더링해 만든 assets/body-map.png
+       R,G = 법선 x,y · B = 오목한 그늘(AO) · A = 재질(40 피부, 120 금속, 160 케이블, 200 눈)
+   - 매 프레임 조명을 계산해 밝기 → 글자 밀도( . : - = + 1 0 8 # @ )와 색
+   - 사이버펑크: 관자놀이 금속 임플란트 · 뺨 회로선 · 목 옆 포트와 케이블
+   - 지지직: 가로 찢김 + 색 분리, 블록 깨짐, 신호 끊김, 스캔라인, 0/1 데이터 스캔, 잡음 줄
+   - 칩이 꽂히면 목 안에 묻힌 부분이 연두색으로 비치고 파동이 퍼짐
 
-   사용: BinaryBody.start(canvas, { left, top, size, slotH, depth }) → { portX, portY }
+   사용: BinaryBody.start(canvas, { left, top, size, slotH, depth })
          BinaryBody.setNear(bool) / lock() / stop()
          BinaryBody.PORT (상자 0~1 기준 포트 위치), BinaryBody.NECK_W
    ========================================================= */
 (() => {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const MAP_SRC = 'assets/body-map.png';
+  const PORT = { x: 0.634, y: 0.7266 };       // 목 오른쪽 옆 (맵에서 계산한 값)
+  const NECK_W = 0.2766;
 
-  /* ---------- 3D 형태 (거리 함수) ---------- */
-  const YAW = (-48 * Math.PI) / 180;            // 얼굴이 왼쪽 앞을 보게 (3/4)
-  const CY = Math.cos(YAW), SY = Math.sin(YAW);
-  const SPAN = 2.2;                              // 상자 한 변 = 월드 2.2
-  const TOPY = 0.68;                             // 상자 위쪽 월드 y
-
-  const sph = (x, y, z, r) => Math.hypot(x, y, z) - r;
-  function ell(x, y, z, a, b, c) {
-    const k0 = Math.hypot(x / a, y / b, z / c);
-    const k1 = Math.hypot(x / (a * a), y / (b * b), z / (c * c));
-    return (k0 * (k0 - 1)) / (k1 || 1e-6);
-  }
-  function cap(x, y, z, ax, ay, az, bx, by, bz, r) {
-    const px = x - ax, py = y - ay, pz = z - az, dx = bx - ax, dy = by - ay, dz = bz - az;
-    const h = Math.max(0, Math.min(1, (px * dx + py * dy + pz * dz) / (dx * dx + dy * dy + dz * dz)));
-    return Math.hypot(px - dx * h, py - dy * h, pz - dz * h) - r;
-  }
-  const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
-  const smax = (a, b, k) => -smin(-a, -b, k);
-
-  // 머리 기준 좌표 (얼굴이 +z)
-  function local(x, y, z) {
-    const ax = Math.abs(x);
-    let d = ell(x, y - 0.15, z + 0.05, 0.36, 0.42, 0.44);                     // 두개골
-    d = smin(d, ell(x, y + 0.12, z - 0.08, 0.28, 0.33, 0.31), 0.12);          // 얼굴
-    d = smin(d, sph(x, y + 0.385, z - 0.17, 0.105), 0.1);                    // 턱끝
-    d = smin(d, sph(ax - 0.18, y + 0.25, z - 0.02, 0.1), 0.12);              // 턱선
-    d = smin(d, sph(ax - 0.19, y + 0.04, z - 0.2, 0.1), 0.08);               // 광대
-    d = smin(d, cap(x, y, z, -0.17, 0.08, 0.3, 0.17, 0.08, 0.3, 0.055), 0.06); // 눈썹뼈
-    d = smax(d, -sph(ax - 0.125, y - 0.005, z - 0.36, 0.075), 0.04);         // 눈두덩
-    d = Math.min(d, sph(ax - 0.125, y, z - 0.29, 0.06));                     // 눈
-    d = smin(d, cap(x, y, z, 0, 0.04, 0.35, 0, -0.13, 0.43, 0.04), 0.05);    // 콧대
-    d = smin(d, sph(x, y + 0.145, z - 0.425, 0.05), 0.03);                   // 코끝
-    d = smin(d, sph(ax - 0.045, y + 0.16, z - 0.39, 0.035), 0.03);           // 콧방울
-    d = smin(d, ell(x, y + 0.235, z - 0.355, 0.085, 0.028, 0.04), 0.03);     // 윗입술
-    d = smin(d, ell(x, y + 0.285, z - 0.345, 0.075, 0.03, 0.04), 0.03);      // 아랫입술
-    d = smax(d, -ell(x, y + 0.258, z - 0.4, 0.08, 0.006, 0.05), 0.01);       // 입술 사이
-    d = smin(d, ell(ax - 0.36, y, z + 0.02, 0.045, 0.11, 0.075), 0.04);      // 귀
-    d = smin(d, cap(x, y, z, 0, -0.3, -0.06, 0, -1.0, -0.04, 0.165), 0.12);  // 목
-    d = smin(d, cap(x, y, z, -0.78, -1.12, -0.08, 0.78, -1.12, -0.08, 0.2), 0.3); // 어깨
-    d = smin(d, ell(x, y + 1.45, z, 0.8, 0.45, 0.32), 0.2);                  // 가슴
-    return d;
-  }
-  const map = (x, y, z) => local(x * CY - z * SY, y, x * SY + z * CY);
-  const toWorld = (x, y, z) => [x * CY + z * SY, y, -x * SY + z * CY];
-
-  // 포트: 목 오른쪽 뒤 표면
-  const PORT_W = toWorld(0.132, -0.62, -0.149);
-  const PORT = { x: 0.5 + PORT_W[0] / SPAN, y: (TOPY - PORT_W[1]) / SPAN };
-  const NECK_W = 0.34 / SPAN;
-
-  /* ---------- 글자·색 ---------- */
   const RAMP = ['.', '.', ',', ':', ';', '-', '=', '+', '1', '1', '0', '0', '8', '#', '@'];
-  const SHADES = ['#5a0a1a', '#a3102e', '#e01a3f', '#ff4d6a', '#ffa3b5', '#ffe6ec', '#5ef6ff', '#12f870'];
-  const CYAN = 6, GREEN = 7;
+  const METAL = ['=', '#', '=', '[', ']', '#', '%'];
+  const NOISE = ['0', '1', '#', '%', '&', '$', '@', '/', '\\', '<', '>', '*', '?'];
+  const SHADES = ['#4a0816', '#93102b', '#d8193d', '#ff4a66', '#ffa0b2', '#ffe8ee', '#5ef6ff', '#12f870', '#bfe9ee'];
+  const CYAN = 6, GREEN = 7, STEEL = 8;
+  const GLYPHS = [...new Set([...RAMP, ...METAL, ...NOISE, 'o', '@', '0', '1', '|'])];
+
+  let mapData = null, mapW = 0, mapH = 0;
+  const mapReady = new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = mapW = img.naturalWidth; c.height = mapH = img.naturalHeight;
+      const g = c.getContext('2d');
+      g.drawImage(img, 0, 0);
+      mapData = g.getImageData(0, 0, mapW, mapH).data;
+      resolve(true);
+    };
+    img.onerror = () => resolve(false);
+    img.src = MAP_SRC;
+  });
 
   let cv = null, ctx = null, dpr = 1, raf = 0, running = false;
   let box = null, cells = [], rain = [], parts = [], atlas = null;
   let cw = 5, ch = 8, cols = 0, rows = 0;
   let lockedAt = 0, near = false, t0 = 0, lastFrame = 0;
+  let blocks = [], dropUntil = 0, dropShift = 0, tearUntil = 0, tear = null;
 
   function buildAtlas() {
     atlas = [];
     const font = `700 ${ch * 1.08}px Consolas, Menlo, "DejaVu Sans Mono", "Courier New", monospace`;
     for (let s = 0; s < SHADES.length; s++) {
       atlas[s] = {};
-      for (const c of new Set([...RAMP, '0', '1'])) {
+      for (const c of GLYPHS) {
         const can = document.createElement('canvas');
         can.width = Math.ceil(cw * dpr * 1.3);
         can.height = Math.ceil(ch * dpr * 1.2);
@@ -97,49 +67,66 @@
     }
   }
 
-  // 형태를 한 번 계산: 셀마다 레이마칭 → 법선 · AO
+  // 맵의 한 칸을 평균해 셀 정보로 (작은 칸 여러 개를 모아 부드럽게)
+  function sample(u, v, du, dv) {
+    let nx = 0, ny = 0, ao = 0, n = 0;
+    const mats = {};
+    for (let j = 0; j < 3; j++) {
+      for (let i = 0; i < 3; i++) {
+        const x = Math.min(mapW - 1, Math.max(0, Math.floor((u + (i - 1) * du / 3) * mapW)));
+        const y = Math.min(mapH - 1, Math.max(0, Math.floor((v + (j - 1) * dv / 3) * mapH)));
+        const k = (y * mapW + x) * 4;
+        const a = mapData[k + 3];
+        if (a < 20) continue;
+        nx += mapData[k] / 127.5 - 1;
+        ny += mapData[k + 1] / 127.5 - 1;
+        ao += mapData[k + 2] / 255;
+        const m = Math.round(a / 40);
+        mats[m] = (mats[m] || 0) + 1;
+        n++;
+      }
+    }
+    if (n < 4) return null;
+    nx /= n; ny /= n; ao /= n;
+    let mat = 1, best = 0;
+    for (const m in mats) if (mats[m] > best || (m >= 3 && mats[m] >= 2)) { best = mats[m]; mat = +m; }
+    const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+    return { nx, ny, nz, ao, mat };
+  }
+
   function build() {
     const S = box.size;
-    ch = Math.max(5, Math.min(10, S / 112));
+    ch = Math.max(5, Math.min(10, S / 120));
     cw = ch * 0.6;
     cols = Math.ceil(S / cw);
     rows = Math.ceil(S / ch);
     cells = [];
-    const e = 0.004;
+    const grid = new Array(cols * rows).fill(null);
     for (let r = 0; r < rows; r++) {
-      const wy = TOPY - (((r + 0.5) * ch) / S) * SPAN;
+      const v = ((r + 0.5) * ch) / S;
       for (let c = 0; c < cols; c++) {
-        const wx = (((c + 0.5) * cw) / S - 0.5) * SPAN;
-        let z = 1.2, hit = false;
-        for (let i = 0; i < 64; i++) {
-          const d = map(wx, wy, z);
-          if (d < 0.003) { hit = true; break; }
-          z -= Math.max(d, 0.004);
-          if (z < -1.2) break;
-        }
-        if (!hit) continue;
-        let nx = map(wx + e, wy, z) - map(wx - e, wy, z);
-        let ny = map(wx, wy + e, z) - map(wx, wy - e, z);
-        let nz = map(wx, wy, z + e) - map(wx, wy, z - e);
-        const nl = Math.hypot(nx, ny, nz) || 1;
-        nx /= nl; ny /= nl; nz /= nl;
-        let ao = 0;
-        for (let k = 1; k <= 4; k++) {
-          const h = 0.035 * k;
-          ao += (h - map(wx + nx * h, wy + ny * h, z + nz * h)) / Math.pow(2, k);
-        }
-        ao = Math.max(0, Math.min(1, 1 - ao * 3.2));
-        const fade = wy < -1.12 ? Math.max(0, 1 - (-1.12 - wy) / 0.42) : 1;
-        if (Math.random() > Math.max(0.05, fade)) continue;
-        cells.push({ c, r, wx, wy, nx, ny, nz, ao, fade, seed: Math.random() });
+        const u = ((c + 0.5) * cw) / S;
+        const s = sample(u, v, cw / S, ch / S);
+        if (!s) continue;
+        const fade = v > 0.86 ? Math.max(0, 1 - (v - 0.86) / 0.14) : 1;     // 아래쪽은 흩어짐
+        if (Math.random() > Math.max(0.04, fade)) continue;
+        const cell = { c, r, u, v, ...s, fade, seed: Math.random(), metalCh: METAL[Math.floor(Math.random() * METAL.length)] };
+        cells.push(cell);
+        grid[r * cols + c] = cell;
       }
+    }
+    for (const p of cells) {
+      const n = (dc, dr) => grid[(p.r + dr) * cols + (p.c + dc)];
+      p.edge = !(n(1, 0) && n(-1, 0) && n(0, 1) && n(0, -1));
     }
     rain = [];
     const vw = cv.width / dpr;
-    const n = Math.floor(vw / (cw * 9));
+    const n = Math.floor(vw / (cw * 10));
     for (let i = 0; i < n; i++) rain.push({ x: Math.random() * vw, y: Math.random() * (cv.height / dpr), v: 30 + Math.random() * 90, len: 6 + Math.floor(Math.random() * 14) });
     buildAtlas();
   }
+
+  const pickNoise = () => NOISE[Math.floor(Math.random() * NOISE.length)];
 
   function frame(ts) {
     if (!running) return;
@@ -148,16 +135,33 @@
     const dt = Math.min(0.1, (ts - lastFrame) / 1000 || 0.033);
     lastFrame = ts;
     const t = (ts - t0) / 1000;
+    const now = performance.now();
     const W = cv.width / dpr, H = cv.height / dpr;
-    const S = box.size, ox = box.left, oy = box.top;
+    const S = box.size;
+    let ox = box.left;
+    const oy = box.top;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    ctx.globalAlpha = 0.88;
+    ctx.globalAlpha = 0.9;
     ctx.fillStyle = 'rgb(3, 2, 6)';
     ctx.fillRect(0, 0, W, H);
 
-    // 배경 ASCII 비
+    /* --- 지지직 --- */
+    if (!reduceMotion) {
+      if (now > dropUntil && Math.random() < 0.025) { dropUntil = now + 60 + Math.random() * 120; dropShift = (Math.random() - 0.5) * 30; }
+      if (now > tearUntil && Math.random() < 0.09) {
+        const r0 = Math.floor(Math.random() * rows);
+        tear = { r0, r1: r0 + 1 + Math.floor(Math.random() * 6), shift: Math.round((Math.random() - 0.5) * 14) };
+        tearUntil = now + 50 + Math.random() * 140;
+      }
+      if (now > tearUntil) tear = null;
+      if (Math.random() < 0.12) blocks.push({ c: Math.floor(Math.random() * cols), r: Math.floor(Math.random() * rows), w: 3 + Math.floor(Math.random() * 14), h: 1 + Math.floor(Math.random() * 4), until: now + 80 + Math.random() * 220 });
+      blocks = blocks.filter((b) => b.until > now);
+    }
+    const dropping = now < dropUntil;
+    if (dropping) ox += dropShift;
+
     if (!reduceMotion) {
       for (const d of rain) {
         d.y += d.v * dt;
@@ -165,59 +169,90 @@
         for (let k = 0; k < d.len; k++) {
           const y = d.y - k * ch;
           if (y < -ch || y > H) continue;
-          ctx.globalAlpha = (k === 0 ? 0.35 : 0.14) * (1 - k / d.len);
+          ctx.globalAlpha = (k === 0 ? 0.3 : 0.11) * (1 - k / d.len);
           ctx.drawImage(atlas[k === 0 ? 2 : 1][Math.random() < 0.5 ? '0' : '1'], d.x, y, cw * 1.3, ch * 1.2);
         }
       }
     }
 
-    // 조명: 얼굴 쪽(왼쪽 위 앞) 키 라이트가 천천히 흔들림 + 오른쪽 뒤 테두리 빛
-    const la = Math.sin(t * 0.35) * 0.25;
-    let lx = -0.55 + la, ly = 0.5, lz = 0.67;
+    // 조명: 정면 위쪽 키 라이트(좌우로 천천히) + 오른쪽 뒤 테두리 빛
+    const la = Math.sin(t * 0.3) * 0.35;
+    let lx = -0.3 + la, ly = 0.45, lz = 0.84;
     const ll = Math.hypot(lx, ly, lz); lx /= ll; ly /= ll; lz /= ll;
-    const rx = 0.88, ry = 0.25, rz = -0.4;
-    const scanY = TOPY - ((t * 0.32) % 1.5) * (SPAN / 1.4);
-    const lockT = lockedAt ? (performance.now() - lockedAt) / 1000 : -1;
-    const gRow = !reduceMotion && Math.random() < 0.12 ? Math.floor(Math.random() * rows) : -99;
-    const gShift = Math.round((Math.random() - 0.5) * 8);
-    const sx0 = (box.depth / S) * SPAN, sh0 = (box.slotH / S) * SPAN;
+    const rx = 0.9, ry = 0.2, rz = -0.3;
+    const scanV = ((t * 0.22) % 1.3) - 0.15;
+    const lockT = lockedAt ? (now - lockedAt) / 1000 : -1;
+    const su = box.depth / S, sv = box.slotH / S;
+    const inBlock = (p) => blocks.some((b) => p.c >= b.c && p.c < b.c + b.w && p.r >= b.r && p.r < b.r + b.h);
 
     for (const p of cells) {
       const diff = Math.max(0, p.nx * lx + p.ny * ly + p.nz * lz);
-      const back = Math.pow(Math.max(0, p.nx * rx + p.ny * ry + p.nz * rz), 1.4);
-      const rim = Math.pow(1 - Math.max(0, p.nz), 3);
-      const spec = Math.pow(Math.max(0, 2 * diff * p.nz - lz), 24);
-      let v = p.ao * (0.06 + 0.72 * diff) + 0.5 * back + 0.22 * rim * p.ao + 0.4 * spec;
-      v = Math.pow(Math.min(1, v), 1.15) * (0.93 + 0.07 * Math.sin(t * 7 + p.seed * 40)) * p.fade;
+      const back = Math.pow(Math.max(0, p.nx * rx + p.ny * ry + p.nz * rz), 1.6);
+      const rim = Math.pow(1 - p.nz, 3);
+      const spec = Math.pow(Math.max(0, 2 * diff * p.nz - lz), p.mat === 3 ? 8 : 30);
+      let v = p.ao * (0.1 + 0.85 * diff) + 0.3 * back + 0.15 * rim * p.ao + (p.mat === 3 ? 0.6 : 0.3) * spec;
+      v = Math.pow(Math.min(1, v * 1.08), 1.05) * (0.94 + 0.06 * Math.sin(t * 7 + p.seed * 40)) * p.fade;
+      if (p.edge) v = Math.max(v, 0.45);
 
-      let shade = v < 0.16 ? 0 : v < 0.32 ? 1 : v < 0.52 ? 2 : v < 0.72 ? 3 : v < 0.88 ? 4 : 5;
-      let glyph = RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
-      if ((glyph === '1' || glyph === '0') && Math.random() < 0.08) glyph = Math.random() < 0.5 ? '0' : '1';
-      const sd = Math.abs(p.wy - scanY);
-      if (sd < 0.03) { glyph = Math.random() < 0.5 ? '0' : '1'; shade = Math.min(5, shade + 2); v = 1; }
-      else if (sd < 0.07) shade = Math.min(5, shade + 1);
-      if (back > 0.75 && Math.random() < 0.06) shade = CYAN;
+      let shade = v < 0.15 ? 0 : v < 0.3 ? 1 : v < 0.5 ? 2 : v < 0.7 ? 3 : v < 0.87 ? 4 : 5;
+      let glyph;
+      if (p.mat === 3) {
+        glyph = p.metalCh;
+        shade = v > 0.55 ? 5 : STEEL;
+        if (Math.random() < 0.05) shade = CYAN;
+      } else if (p.mat === 4) {
+        glyph = Math.random() < 0.85 ? '=' : '|';
+        shade = v > 0.45 ? STEEL : 1;
+      } else if (p.mat === 5) {
+        glyph = v > 0.45 ? '@' : 'o';
+        shade = Math.random() < 0.2 ? CYAN : 5;
+      } else {
+        glyph = RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
+        if ((glyph === '1' || glyph === '0') && Math.random() < 0.08) glyph = Math.random() < 0.5 ? '0' : '1';
+      }
+
+      const sd = Math.abs(p.v - scanV);
+      if (sd < 0.012) { glyph = Math.random() < 0.5 ? '0' : '1'; shade = Math.min(5, shade + 2); v = 1; }
+      else if (sd < 0.03) shade = Math.min(5, shade + 1);
+      if (p.mat === 1 && back > 0.7 && Math.random() < 0.05) shade = CYAN;
+      if (inBlock(p)) { glyph = pickNoise(); shade = Math.random() < 0.3 ? CYAN : Math.random() < 0.5 ? 5 : 3; v = 1; }
 
       if (lockT >= 0) {
-        const dist = Math.hypot(p.wx - PORT_W[0], p.wy - PORT_W[1]);
-        const wave = Math.max(0, 1 - Math.abs(dist - lockT * 1.6) / 0.12);
+        const dist = Math.hypot(p.u - PORT.x, p.v - PORT.y);
+        const wave = Math.max(0, 1 - Math.abs(dist - lockT * 0.75) / 0.05);
         if (wave > 0.3) { shade = wave > 0.75 ? 5 : 4; glyph = Math.random() < 0.5 ? '0' : '1'; }
-        if (p.wx > PORT_W[0] - sx0 && p.wx < PORT_W[0] + 0.01 && Math.abs(p.wy - PORT_W[1]) < sh0 * 0.62) {
+        if (p.u > PORT.x - su && p.u < PORT.x + 0.004 && Math.abs(p.v - PORT.y) < sv * 0.62) {
           shade = GREEN; glyph = Math.random() < 0.5 ? '0' : '1'; v = 1;
         }
       }
 
       let x = ox + p.c * cw;
       const y = oy + p.r * ch;
-      if (Math.abs(p.r - gRow) < 2) x += gShift * cw;
-      ctx.globalAlpha = Math.max(0.3, Math.min(1, 0.3 + v * 1.1));
+      let a = Math.max(0.28, Math.min(1, 0.28 + v * 1.1));
+      if (p.r % 2 === 1) a *= 0.86;
+      if (dropping) a *= 0.55;
+      if (tear && p.r >= tear.r0 && p.r < tear.r1) {
+        ctx.globalAlpha = a * 0.6;
+        ctx.drawImage(atlas[CYAN][glyph], x + (tear.shift - 2) * cw - cw * 0.15, y - ch * 0.1, cw * 1.3, ch * 1.2);
+        x += tear.shift * cw;
+      }
+      ctx.globalAlpha = a;
       ctx.drawImage(atlas[shade][glyph], x - cw * 0.15, y - ch * 0.1, cw * 1.3, ch * 1.2);
     }
     ctx.globalAlpha = 1;
 
+    if (!reduceMotion && Math.random() < 0.18) {
+      const y = Math.random() * H;
+      ctx.globalAlpha = 0.25;
+      for (let x = 0; x < W; x += cw * (1 + Math.floor(Math.random() * 3))) {
+        ctx.drawImage(atlas[Math.random() < 0.3 ? CYAN : 2][pickNoise()], x, y, cw * 1.3, ch * 1.2);
+      }
+      ctx.globalAlpha = 1;
+    }
+
     if (!reduceMotion) {
       for (let i = 0; i < 4; i++) {
-        parts.push({ x: ox + S * (0.25 + Math.random() * 0.55), y: oy + S * (0.92 + Math.random() * 0.08), vx: (Math.random() - 0.35) * 18, vy: -14 - Math.random() * 30, life: 1, s: 1.2 + Math.random() * 2.2 });
+        parts.push({ x: ox + S * (0.1 + Math.random() * 0.8), y: oy + S * (0.92 + Math.random() * 0.08), vx: (Math.random() - 0.5) * 18, vy: -14 - Math.random() * 30, life: 1, s: 1.2 + Math.random() * 2.2 });
       }
     }
     for (let i = parts.length - 1; i >= 0; i--) {
@@ -261,15 +296,16 @@
     cv.width = Math.floor(window.innerWidth * dpr);
     cv.height = Math.floor(window.innerHeight * dpr);
     box = { left: opts.left, top: opts.top, size: opts.size, slotH: opts.slotH, depth: opts.depth };
-    build();
-    parts = [];
-    lockedAt = 0;
-    near = false;
     running = true;
-    t0 = performance.now();
-    lastFrame = 0;
-    raf = requestAnimationFrame(frame);
-    return { portX: box.left + PORT.x * box.size, portY: box.top + PORT.y * box.size };
+    const token = (start.token = (start.token || 0) + 1);
+    mapReady.then((ok) => {
+      if (!ok || !running || token !== start.token) return;
+      build();
+      parts = []; blocks = []; tear = null;
+      lockedAt = 0; near = false;
+      t0 = performance.now(); lastFrame = 0;
+      raf = requestAnimationFrame(frame);
+    });
   }
 
   function lock() { lockedAt = performance.now(); near = false; }

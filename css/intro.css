@@ -114,6 +114,7 @@ html, body {
 #replay:hover { background: var(--cyan); }
 
 /* ---------- 사운드 토글 ---------- */
+#sound[hidden] { display: none !important; }
 #sound {
   position: fixed;
   top: 16px;
