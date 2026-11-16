@@ -1,209 +1,246 @@
 /* =========================================================
-   NIGHT CITY : JACK IN — BINARY BODY
-   0과 1로만 이루어진 사람 흉상(옆모습, 왼쪽을 봄). 목 뒤에 칩 포트가 있다.
-   - 윤곽 안을 격자로 채운 숫자(0/1)가 계속 바뀌고, 가장자리가 밝게 빛남(림 라이트)
-   - 아래로 갈수록 흩어지며 시안 입자로 부서짐, 세로 빛줄기·가로 글리치
-   - 칩이 꽂히면 포트에서 밝아지는 파동이 몸 전체로 퍼짐
+   NIGHT CITY : JACK IN — BINARY BODY (ASCII 렌더러)
+   3D로 계산한 오리지널 사람 흉상(3/4 옆모습)을 ASCII 아트로 그린다.
+   - 브라우저에서 SDF 레이마칭으로 형태를 한 번 계산 (머리·얼굴·목·어깨)
+     → 셀마다 법선·오목함(AO) 저장
+   - 매 프레임 조명을 계산해 밝기 → 글자 밀도( . : - = + 1 0 8 # @ )와 색으로 변환
+   - 스캔 띠가 지나가면 그 줄은 0/1 데이터로 뒤바뀜, 가로 글리치, 배경 ASCII 비,
+     아래쪽은 시안 입자로 부서짐
+   - 목 오른쪽 뒤에 포트. 칩이 꽂히면 묻힌 부분이 연두색으로 비치고 파동이 퍼짐
 
-   사용: BinaryBody.start(canvas, { left, top, size }) → { portX, portY, neckW }
-         BinaryBody.lock()  칩 고정 (파동 시작)
-         BinaryBody.stop()
+   사용: BinaryBody.start(canvas, { left, top, size, slotH, depth }) → { portX, portY }
+         BinaryBody.setNear(bool) / lock() / stop()
+         BinaryBody.PORT (상자 0~1 기준 포트 위치), BinaryBody.NECK_W
    ========================================================= */
 (() => {
-  // 옆모습 윤곽 (정사각형 상자 0~1 기준, 왼쪽이 얼굴)
-  const OUTLINE = [
-    [0.52, 0.03], [0.42, 0.045], [0.345, 0.09], [0.305, 0.15], [0.292, 0.205], [0.296, 0.235],
-    [0.282, 0.262], [0.262, 0.305], [0.243, 0.338], [0.262, 0.352], [0.27, 0.364],
-    [0.262, 0.378], [0.27, 0.392], [0.264, 0.408], [0.276, 0.425], [0.272, 0.448],
-    [0.296, 0.478], [0.35, 0.49], [0.39, 0.5], [0.395, 0.56], [0.388, 0.625],
-    [0.33, 0.68], [0.2, 0.735], [0.11, 0.8], [0.07, 0.9], [0.06, 1.0],
-    [0.94, 1.0], [0.93, 0.9], [0.88, 0.8], [0.8, 0.73], [0.69, 0.68],
-    [0.615, 0.62], [0.6, 0.55], [0.615, 0.47], [0.665, 0.415], [0.7, 0.33],
-    [0.705, 0.235], [0.675, 0.14], [0.615, 0.07],
-  ];
-  const PORT = { x: 0.603, y: 0.545 };     // 목 뒤 포트 (상자 기준)
-  const NECK_W = 0.2;
-
-  const COL = { red: '#ff2b4d', hot: '#ffc2cd', deep: '#c8183a', cyan: '#5ef6ff', green: '#12f870' };
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  let cv = null, ctx = null, dpr = 1, raf = 0, running = false;
-  let box = null, pts = [], parts = [], sprites = null, step = 8;
-  let lockedAt = 0, lastFrame = 0, t0 = 0, near = false;
+  /* ---------- 3D 형태 (거리 함수) ---------- */
+  const YAW = (-48 * Math.PI) / 180;            // 얼굴이 왼쪽 앞을 보게 (3/4)
+  const CY = Math.cos(YAW), SY = Math.sin(YAW);
+  const SPAN = 2.2;                              // 상자 한 변 = 월드 2.2
+  const TOPY = 0.68;                             // 상자 위쪽 월드 y
 
-  function catmull(points, seg = 6) {
-    const out = [];
-    const n = points.length;
-    for (let i = 0; i < n; i++) {
-      const p0 = points[(i - 1 + n) % n], p1 = points[i], p2 = points[(i + 1) % n], p3 = points[(i + 2) % n];
-      for (let k = 0; k < seg; k++) {
-        const t = k / seg, t2 = t * t, t3 = t2 * t;
-        out.push([
-          0.5 * (2 * p1[0] + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-          0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
-        ]);
-      }
-    }
-    return out;
+  const sph = (x, y, z, r) => Math.hypot(x, y, z) - r;
+  function ell(x, y, z, a, b, c) {
+    const k0 = Math.hypot(x / a, y / b, z / c);
+    const k1 = Math.hypot(x / (a * a), y / (b * b), z / (c * c));
+    return (k0 * (k0 - 1)) / (k1 || 1e-6);
   }
+  function cap(x, y, z, ax, ay, az, bx, by, bz, r) {
+    const px = x - ax, py = y - ay, pz = z - az, dx = bx - ax, dy = by - ay, dz = bz - az;
+    const h = Math.max(0, Math.min(1, (px * dx + py * dy + pz * dz) / (dx * dx + dy * dy + dz * dz)));
+    return Math.hypot(px - dx * h, py - dy * h, pz - dz * h) - r;
+  }
+  const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+  const smax = (a, b, k) => -smin(-a, -b, k);
 
-  // 숫자 스프라이트 (색 4단계 × 0/1)
-  function makeSprites(size) {
-    const shades = [COL.deep, COL.red, COL.hot, COL.cyan, COL.green];
-    const s = {};
-    shades.forEach((c, i) => {
-      ['0', '1'].forEach((d) => {
+  // 머리 기준 좌표 (얼굴이 +z)
+  function local(x, y, z) {
+    const ax = Math.abs(x);
+    let d = ell(x, y - 0.15, z + 0.05, 0.36, 0.42, 0.44);                     // 두개골
+    d = smin(d, ell(x, y + 0.12, z - 0.08, 0.28, 0.33, 0.31), 0.12);          // 얼굴
+    d = smin(d, sph(x, y + 0.385, z - 0.17, 0.105), 0.1);                    // 턱끝
+    d = smin(d, sph(ax - 0.18, y + 0.25, z - 0.02, 0.1), 0.12);              // 턱선
+    d = smin(d, sph(ax - 0.19, y + 0.04, z - 0.2, 0.1), 0.08);               // 광대
+    d = smin(d, cap(x, y, z, -0.17, 0.08, 0.3, 0.17, 0.08, 0.3, 0.055), 0.06); // 눈썹뼈
+    d = smax(d, -sph(ax - 0.125, y - 0.005, z - 0.36, 0.075), 0.04);         // 눈두덩
+    d = Math.min(d, sph(ax - 0.125, y, z - 0.29, 0.06));                     // 눈
+    d = smin(d, cap(x, y, z, 0, 0.04, 0.35, 0, -0.13, 0.43, 0.04), 0.05);    // 콧대
+    d = smin(d, sph(x, y + 0.145, z - 0.425, 0.05), 0.03);                   // 코끝
+    d = smin(d, sph(ax - 0.045, y + 0.16, z - 0.39, 0.035), 0.03);           // 콧방울
+    d = smin(d, ell(x, y + 0.235, z - 0.355, 0.085, 0.028, 0.04), 0.03);     // 윗입술
+    d = smin(d, ell(x, y + 0.285, z - 0.345, 0.075, 0.03, 0.04), 0.03);      // 아랫입술
+    d = smax(d, -ell(x, y + 0.258, z - 0.4, 0.08, 0.006, 0.05), 0.01);       // 입술 사이
+    d = smin(d, ell(ax - 0.36, y, z + 0.02, 0.045, 0.11, 0.075), 0.04);      // 귀
+    d = smin(d, cap(x, y, z, 0, -0.3, -0.06, 0, -1.0, -0.04, 0.165), 0.12);  // 목
+    d = smin(d, cap(x, y, z, -0.78, -1.12, -0.08, 0.78, -1.12, -0.08, 0.2), 0.3); // 어깨
+    d = smin(d, ell(x, y + 1.45, z, 0.8, 0.45, 0.32), 0.2);                  // 가슴
+    return d;
+  }
+  const map = (x, y, z) => local(x * CY - z * SY, y, x * SY + z * CY);
+  const toWorld = (x, y, z) => [x * CY + z * SY, y, -x * SY + z * CY];
+
+  // 포트: 목 오른쪽 뒤 표면
+  const PORT_W = toWorld(0.132, -0.62, -0.149);
+  const PORT = { x: 0.5 + PORT_W[0] / SPAN, y: (TOPY - PORT_W[1]) / SPAN };
+  const NECK_W = 0.34 / SPAN;
+
+  /* ---------- 글자·색 ---------- */
+  const RAMP = ['.', '.', ',', ':', ';', '-', '=', '+', '1', '1', '0', '0', '8', '#', '@'];
+  const SHADES = ['#5a0a1a', '#a3102e', '#e01a3f', '#ff4d6a', '#ffa3b5', '#ffe6ec', '#5ef6ff', '#12f870'];
+  const CYAN = 6, GREEN = 7;
+
+  let cv = null, ctx = null, dpr = 1, raf = 0, running = false;
+  let box = null, cells = [], rain = [], parts = [], atlas = null;
+  let cw = 5, ch = 8, cols = 0, rows = 0;
+  let lockedAt = 0, near = false, t0 = 0, lastFrame = 0;
+
+  function buildAtlas() {
+    atlas = [];
+    const font = `700 ${ch * 1.08}px Consolas, Menlo, "DejaVu Sans Mono", "Courier New", monospace`;
+    for (let s = 0; s < SHADES.length; s++) {
+      atlas[s] = {};
+      for (const c of new Set([...RAMP, '0', '1'])) {
         const can = document.createElement('canvas');
-        can.width = can.height = Math.ceil(size * dpr);
+        can.width = Math.ceil(cw * dpr * 1.3);
+        can.height = Math.ceil(ch * dpr * 1.2);
         const g = can.getContext('2d');
         g.scale(dpr, dpr);
-        g.font = `700 ${size * 0.95}px "JetBrains Mono", Consolas, "Courier New", monospace`;
+        g.font = font;
         g.textAlign = 'center';
         g.textBaseline = 'middle';
-        g.fillStyle = c;
-        g.fillText(d, size / 2, size / 2 + size * 0.04);
-        s[`${i}${d}`] = can;
-      });
-    });
-    return s;
-  }
-
-  function build() {
-    const S = box.size;
-    step = Math.max(6, Math.round(S / 78));
-    // 윤곽 마스크
-    const m = document.createElement('canvas');
-    m.width = m.height = Math.ceil(S);
-    const g = m.getContext('2d');
-    const curve = catmull(OUTLINE);
-    g.beginPath();
-    curve.forEach(([x, y], i) => (i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S)));
-    g.closePath();
-    g.fill();
-    const data = g.getImageData(0, 0, m.width, m.height).data;
-    const inside = (x, y) => x >= 0 && y >= 0 && x < m.width && y < m.height && data[(Math.floor(y) * m.width + Math.floor(x)) * 4 + 3] > 128;
-
-    pts = [];
-    for (let y = step / 2; y < S; y += step) {
-      for (let x = step / 2; x < S; x += step) {
-        if (!inside(x, y)) continue;
-        // 가장자리까지 거리 (8방향, 칸 단위)
-        let d = 8;
-        for (let r = 1; r <= 7 && d === 8; r++) {
-          for (let a = 0; a < 8; a++) {
-            const ang = (a / 8) * Math.PI * 2;
-            if (!inside(x + Math.cos(ang) * r * step, y + Math.sin(ang) * r * step)) { d = r; break; }
-          }
-        }
-        const ny = y / S;
-        // 아래쪽은 점점 흩어짐
-        const fade = ny > 0.78 ? 1 - (ny - 0.78) / 0.24 : 1;
-        if (Math.random() > Math.max(0.12, fade)) continue;
-        // 밝기: 가장자리 림 라이트 + 위·뒤쪽에서 오는 빛 + 흔들림
-        const rim = d <= 1 ? 1 : d === 2 ? 0.8 : d === 3 ? 0.6 : 0.4;
-        const light = 0.3 * (1 - ny) + 0.2 * (x / S);
-        const b = Math.min(1, rim + light + Math.random() * 0.18) * fade;
-        pts.push({ x, y, b, d: Math.random() < 0.5 ? '0' : '1', fade });
+        g.fillStyle = SHADES[s];
+        g.fillText(c, (cw * 1.3) / 2, (ch * 1.2) / 2);
+        atlas[s][c] = can;
       }
     }
-    sprites = makeSprites(step * 1.15);
   }
 
-  function shadeOf(b) { return b > 0.9 ? 2 : b > 0.5 ? 1 : 0; }
+  // 형태를 한 번 계산: 셀마다 레이마칭 → 법선 · AO
+  function build() {
+    const S = box.size;
+    ch = Math.max(5, Math.min(10, S / 112));
+    cw = ch * 0.6;
+    cols = Math.ceil(S / cw);
+    rows = Math.ceil(S / ch);
+    cells = [];
+    const e = 0.004;
+    for (let r = 0; r < rows; r++) {
+      const wy = TOPY - (((r + 0.5) * ch) / S) * SPAN;
+      for (let c = 0; c < cols; c++) {
+        const wx = (((c + 0.5) * cw) / S - 0.5) * SPAN;
+        let z = 1.2, hit = false;
+        for (let i = 0; i < 64; i++) {
+          const d = map(wx, wy, z);
+          if (d < 0.003) { hit = true; break; }
+          z -= Math.max(d, 0.004);
+          if (z < -1.2) break;
+        }
+        if (!hit) continue;
+        let nx = map(wx + e, wy, z) - map(wx - e, wy, z);
+        let ny = map(wx, wy + e, z) - map(wx, wy - e, z);
+        let nz = map(wx, wy, z + e) - map(wx, wy, z - e);
+        const nl = Math.hypot(nx, ny, nz) || 1;
+        nx /= nl; ny /= nl; nz /= nl;
+        let ao = 0;
+        for (let k = 1; k <= 4; k++) {
+          const h = 0.035 * k;
+          ao += (h - map(wx + nx * h, wy + ny * h, z + nz * h)) / Math.pow(2, k);
+        }
+        ao = Math.max(0, Math.min(1, 1 - ao * 3.2));
+        const fade = wy < -1.12 ? Math.max(0, 1 - (-1.12 - wy) / 0.42) : 1;
+        if (Math.random() > Math.max(0.05, fade)) continue;
+        cells.push({ c, r, wx, wy, nx, ny, nz, ao, fade, seed: Math.random() });
+      }
+    }
+    rain = [];
+    const vw = cv.width / dpr;
+    const n = Math.floor(vw / (cw * 9));
+    for (let i = 0; i < n; i++) rain.push({ x: Math.random() * vw, y: Math.random() * (cv.height / dpr), v: 30 + Math.random() * 90, len: 6 + Math.floor(Math.random() * 14) });
+    buildAtlas();
+  }
 
   function frame(ts) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
-    if (ts - lastFrame < 33) return;          // 30fps
+    if (ts - lastFrame < 33) return;
+    const dt = Math.min(0.1, (ts - lastFrame) / 1000 || 0.033);
     lastFrame = ts;
     const t = (ts - t0) / 1000;
     const W = cv.width / dpr, H = cv.height / dpr;
+    const S = box.size, ox = box.left, oy = box.top;
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    // 붉은 배경을 눌러 인물이 떠 보이게
-    ctx.fillStyle = 'rgba(3, 2, 6, 0.78)';
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = 'rgb(3, 2, 6)';
     ctx.fillRect(0, 0, W, H);
 
-    const S = box.size, ox = box.left, oy = box.top;
-    const scanY = ((t * 0.22) % 1.3) - 0.15;          // 위에서 아래로 지나가는 스캔 띠
-    const glitchRow = !reduceMotion && Math.random() < 0.08 ? Math.random() : -1;
-    const lockT = lockedAt ? (performance.now() - lockedAt) / 1000 : -1;
-    const px = PORT.x * S, py = PORT.y * S;
-    const sz = step * 1.15;
-
-    for (const p of pts) {
-      if (Math.random() < (reduceMotion ? 0.004 : 0.02)) p.d = p.d === '0' ? '1' : '0';
-      let b = p.b * (0.85 + Math.random() * 0.15);
-      const ny = p.y / S;
-      if (Math.abs(ny - scanY) < 0.035) b = Math.min(1, b + 0.45);
-      // 칩이 꽂히면 포트에서 퍼지는 파동
-      let wave = 0;
-      if (lockT >= 0) {
-        const r = lockT * S * 0.9;
-        const dist = Math.hypot(p.x - px, p.y - py);
-        wave = Math.max(0, 1 - Math.abs(dist - r) / (S * 0.06));
-        b = Math.min(1, b + wave * 0.9);
+    // 배경 ASCII 비
+    if (!reduceMotion) {
+      for (const d of rain) {
+        d.y += d.v * dt;
+        if (d.y - d.len * ch > H) { d.y = -10; d.x = Math.random() * W; }
+        for (let k = 0; k < d.len; k++) {
+          const y = d.y - k * ch;
+          if (y < -ch || y > H) continue;
+          ctx.globalAlpha = (k === 0 ? 0.35 : 0.14) * (1 - k / d.len);
+          ctx.drawImage(atlas[k === 0 ? 2 : 1][Math.random() < 0.5 ? '0' : '1'], d.x, y, cw * 1.3, ch * 1.2);
+        }
       }
-      // 꽂힌 칩이 목 안에서 비쳐 보이는 부분
-      const buried = lockT >= 0 && p.x > px - box.depth && p.x < px && Math.abs(p.y - py) < box.slotH * 0.7;
-      let x = ox + p.x, y = oy + p.y;
-      if (glitchRow >= 0 && Math.abs(ny - glitchRow) < 0.02) x += (Math.random() - 0.5) * step * 4;
-      let shade = wave > 0.5 && lockT >= 0 ? (Math.random() < 0.3 ? 3 : 2) : (Math.random() < 0.004 ? 3 : shadeOf(b));
-      if (buried) { shade = 4; b = 0.75 + Math.random() * 0.25; }
-      ctx.globalAlpha = Math.max(0.32, b);
-      ctx.drawImage(sprites[`${shade}${p.d}`], x - sz / 2, y - sz / 2, sz, sz);
+    }
+
+    // 조명: 얼굴 쪽(왼쪽 위 앞) 키 라이트가 천천히 흔들림 + 오른쪽 뒤 테두리 빛
+    const la = Math.sin(t * 0.35) * 0.25;
+    let lx = -0.55 + la, ly = 0.5, lz = 0.67;
+    const ll = Math.hypot(lx, ly, lz); lx /= ll; ly /= ll; lz /= ll;
+    const rx = 0.88, ry = 0.25, rz = -0.4;
+    const scanY = TOPY - ((t * 0.32) % 1.5) * (SPAN / 1.4);
+    const lockT = lockedAt ? (performance.now() - lockedAt) / 1000 : -1;
+    const gRow = !reduceMotion && Math.random() < 0.12 ? Math.floor(Math.random() * rows) : -99;
+    const gShift = Math.round((Math.random() - 0.5) * 8);
+    const sx0 = (box.depth / S) * SPAN, sh0 = (box.slotH / S) * SPAN;
+
+    for (const p of cells) {
+      const diff = Math.max(0, p.nx * lx + p.ny * ly + p.nz * lz);
+      const back = Math.pow(Math.max(0, p.nx * rx + p.ny * ry + p.nz * rz), 1.4);
+      const rim = Math.pow(1 - Math.max(0, p.nz), 3);
+      const spec = Math.pow(Math.max(0, 2 * diff * p.nz - lz), 24);
+      let v = p.ao * (0.06 + 0.72 * diff) + 0.5 * back + 0.22 * rim * p.ao + 0.4 * spec;
+      v = Math.pow(Math.min(1, v), 1.15) * (0.93 + 0.07 * Math.sin(t * 7 + p.seed * 40)) * p.fade;
+
+      let shade = v < 0.16 ? 0 : v < 0.32 ? 1 : v < 0.52 ? 2 : v < 0.72 ? 3 : v < 0.88 ? 4 : 5;
+      let glyph = RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
+      if ((glyph === '1' || glyph === '0') && Math.random() < 0.08) glyph = Math.random() < 0.5 ? '0' : '1';
+      const sd = Math.abs(p.wy - scanY);
+      if (sd < 0.03) { glyph = Math.random() < 0.5 ? '0' : '1'; shade = Math.min(5, shade + 2); v = 1; }
+      else if (sd < 0.07) shade = Math.min(5, shade + 1);
+      if (back > 0.75 && Math.random() < 0.06) shade = CYAN;
+
+      if (lockT >= 0) {
+        const dist = Math.hypot(p.wx - PORT_W[0], p.wy - PORT_W[1]);
+        const wave = Math.max(0, 1 - Math.abs(dist - lockT * 1.6) / 0.12);
+        if (wave > 0.3) { shade = wave > 0.75 ? 5 : 4; glyph = Math.random() < 0.5 ? '0' : '1'; }
+        if (p.wx > PORT_W[0] - sx0 && p.wx < PORT_W[0] + 0.01 && Math.abs(p.wy - PORT_W[1]) < sh0 * 0.62) {
+          shade = GREEN; glyph = Math.random() < 0.5 ? '0' : '1'; v = 1;
+        }
+      }
+
+      let x = ox + p.c * cw;
+      const y = oy + p.r * ch;
+      if (Math.abs(p.r - gRow) < 2) x += gShift * cw;
+      ctx.globalAlpha = Math.max(0.3, Math.min(1, 0.3 + v * 1.1));
+      ctx.drawImage(atlas[shade][glyph], x - cw * 0.15, y - ch * 0.1, cw * 1.3, ch * 1.2);
     }
     ctx.globalAlpha = 1;
 
-    // 세로 빛줄기
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < 4; i++) {
-      if (Math.random() < 0.5) continue;
-      const x = ox + S * (0.25 + Math.random() * 0.5);
-      const gr = ctx.createLinearGradient(0, oy, 0, oy + S);
-      gr.addColorStop(0, 'rgba(94, 246, 255, 0)');
-      gr.addColorStop(0.3, 'rgba(94, 246, 255, 0.10)');
-      gr.addColorStop(1, 'rgba(94, 246, 255, 0)');
-      ctx.fillStyle = gr;
-      ctx.fillRect(x, oy, 1 + Math.random() * 2, S);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-
-    // 아래쪽에서 부서져 떠오르는 시안 입자
     if (!reduceMotion) {
-      for (let i = 0; i < 3; i++) {
-        parts.push({ x: ox + S * (0.3 + Math.random() * 0.6), y: oy + S * (0.9 + Math.random() * 0.1), vx: (Math.random() - 0.3) * 0.6, vy: -0.3 - Math.random() * 0.6, life: 1, s: 1.5 + Math.random() * 2.5 });
+      for (let i = 0; i < 4; i++) {
+        parts.push({ x: ox + S * (0.25 + Math.random() * 0.55), y: oy + S * (0.92 + Math.random() * 0.08), vx: (Math.random() - 0.35) * 18, vy: -14 - Math.random() * 30, life: 1, s: 1.2 + Math.random() * 2.2 });
       }
     }
     for (let i = parts.length - 1; i >= 0; i--) {
       const q = parts[i];
-      q.x += q.vx; q.y += q.vy; q.life -= 0.015;
+      q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt * 0.5;
       if (q.life <= 0) { parts.splice(i, 1); continue; }
-      ctx.globalAlpha = q.life * 0.7;
-      ctx.fillStyle = COL.cyan;
+      ctx.globalAlpha = q.life * 0.75;
+      ctx.fillStyle = SHADES[CYAN];
       ctx.fillRect(q.x, q.y, q.s, q.s);
     }
     ctx.globalAlpha = 1;
 
-    // 목 포트: 목 표면에 파인 짧은 구멍. 꽂힌 뒤에는 안쪽에 묻힌 칩이 연두색으로 비침
-    const sx = ox + px, sy = oy + py;
+    // 목 포트 소켓
+    const sx = ox + PORT.x * S, sy = oy + PORT.y * S;
     const slotH = box.slotH;
     const pulse = 0.6 + 0.4 * Math.sin(t * 4);
     if (lockT >= 0) {
-      const g = ctx.createLinearGradient(sx - box.depth, 0, sx, 0);
-      g.addColorStop(0, 'rgba(18, 248, 112, 0)');
-      g.addColorStop(1, 'rgba(18, 248, 112, 0.28)');
-      ctx.fillStyle = g;
-      ctx.fillRect(sx - box.depth, sy - slotH / 2, box.depth, slotH);
-      ctx.strokeStyle = '#12f870';
+      ctx.strokeStyle = SHADES[GREEN];
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(sx, sy - slotH / 2 - 3); ctx.lineTo(sx, sy + slotH / 2 + 3); ctx.stroke();
     } else {
       const lip = Math.max(6, slotH * 0.22);
-      const g = ctx.createLinearGradient(sx - lip, 0, sx, 0);
-      g.addColorStop(0, '#000');
-      g.addColorStop(1, '#0a0d12');
-      ctx.fillStyle = g;
+      ctx.fillStyle = '#000';
       ctx.fillRect(sx - lip, sy - slotH / 2, lip, slotH);
       ctx.strokeStyle = near ? '#fcee0a' : `rgba(94, 246, 255, ${pulse})`;
       ctx.lineWidth = 2;
@@ -211,7 +248,7 @@
       ctx.moveTo(sx - lip, sy - slotH / 2); ctx.lineTo(sx, sy - slotH / 2); ctx.lineTo(sx, sy - slotH / 2 - 4);
       ctx.moveTo(sx - lip, sy + slotH / 2); ctx.lineTo(sx, sy + slotH / 2); ctx.lineTo(sx, sy + slotH / 2 + 4);
       ctx.stroke();
-      ctx.fillStyle = near ? 'rgba(252, 238, 10, 0.22)' : `rgba(94, 246, 255, ${0.12 * pulse})`;
+      ctx.fillStyle = near ? 'rgba(252, 238, 10, 0.2)' : `rgba(94, 246, 255, ${0.1 * pulse})`;
       ctx.beginPath(); ctx.arc(sx, sy, slotH * 1.3, 0, Math.PI * 2); ctx.fill();
     }
   }
@@ -232,20 +269,15 @@
     t0 = performance.now();
     lastFrame = 0;
     raf = requestAnimationFrame(frame);
-    return geometry();
-  }
-
-  function geometry() {
-    return { portX: box.left + PORT.x * box.size, portY: box.top + PORT.y * box.size, neckW: NECK_W * box.size };
+    return { portX: box.left + PORT.x * box.size, portY: box.top + PORT.y * box.size };
   }
 
   function lock() { lockedAt = performance.now(); near = false; }
   function setNear(v) { near = !!v; }
-
   function stop() {
     running = false;
     cancelAnimationFrame(raf);
-    if (ctx && cv) ctx.clearRect(0, 0, cv.width, cv.height);
+    if (ctx && cv) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); }
   }
 
   window.BinaryBody = { start, lock, stop, setNear, PORT, NECK_W };

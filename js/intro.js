@@ -677,8 +677,10 @@
     Object.assign(chip.style, { width: `${CW}px`, height: `${CH}px` });
     const gx0 = portX + 14, gx1 = startX - 14;
     Object.assign(guide.style, { left: `${gx0}px`, top: `${cy}px`, width: `${Math.max(0, gx1 - gx0)}px`, display: gx1 - gx0 > 30 ? '' : 'none' });
-    hint.style.top = `${Math.min(vh - 70, cy + CH / 2 + 40)}px`;
-    hint.style.left = `${Math.max(16, portX)}px`;
+    // 안내 문구는 칩 아래 (인물과 겹치지 않게)
+    hint.style.top = `${Math.min(vh - 70, cy + CH / 2 + 34)}px`;
+    hint.style.left = `${startX}px`;
+    hint.style.right = '16px';
     hint.style.textAlign = 'left';
   }
 
