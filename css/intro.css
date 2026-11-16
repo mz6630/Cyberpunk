@@ -270,14 +270,14 @@ html, body {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  filter: drop-shadow(0 12px 16px rgba(0,0,0,0.75));
+  filter: drop-shadow(0 0 6px rgba(94, 246, 255, 0.35)) drop-shadow(0 12px 16px rgba(0,0,0,0.75));
   animation: chip-bob 2.6s ease-in-out infinite;
 }
 #chip:focus-visible { outline: 2px dashed var(--yellow); outline-offset: 10px; }
 #stage.is-dragging #chip { cursor: grabbing; }
 #stage.is-dragging #chip img,
 #stage.is-inserting #chip img { animation: none; }
-#stage.is-inserting #chip img { filter: drop-shadow(0 0 3px var(--capri-green)) drop-shadow(0 0 12px rgba(249, 3, 74, 0.9)) drop-shadow(0 10px 14px rgba(0,0,0,0.6)); }
+#stage.is-inserting #chip img { filter: drop-shadow(0 0 4px rgba(94, 246, 255, 0.9)) drop-shadow(0 0 14px rgba(18, 248, 112, 0.55)) drop-shadow(0 10px 14px rgba(0,0,0,0.6)); }
 @keyframes chip-bob { 50% { transform: translateY(-6px); } }
 
 #stage-hint {

@@ -21,9 +21,10 @@
   const RAMP = ['.', '.', ',', ':', ';', '-', '=', '+', '1', '1', '0', '0', '8', '#', '@'];
   const METAL = ['=', '#', '=', '[', ']', '#', '%'];
   const NOISE = ['0', '1', '#', '%', '&', '$', '@', '/', '\\', '<', '>', '*', '?'];
+  const HALO_CH = ['.', '.', ':', '\'', '`', ',', '-', '0', '1', '1', '0', '+'];
   const SHADES = ['#4a0816', '#93102b', '#d8193d', '#ff4a66', '#ffa0b2', '#ffe8ee', '#5ef6ff', '#12f870', '#bfe9ee'];
   const CYAN = 6, GREEN = 7, STEEL = 8;
-  const GLYPHS = [...new Set([...RAMP, ...METAL, ...NOISE, 'o', '@', '0', '1', '|'])];
+  const GLYPHS = [...new Set([...RAMP, ...METAL, ...NOISE, ...HALO_CH, 'o', '@', '0', '1', '|'])];
 
   let mapData = null, mapW = 0, mapH = 0;
   const mapReady = new Promise((resolve) => {
@@ -41,7 +42,7 @@
   });
 
   let cv = null, ctx = null, dpr = 1, raf = 0, running = false;
-  let box = null, cells = [], rain = [], parts = [], atlas = null;
+  let box = null, cells = [], halo = [], rain = [], parts = [], atlas = null;
   let cw = 5, ch = 8, cols = 0, rows = 0;
   let lockedAt = 0, near = false, t0 = 0, lastFrame = 0;
   let blocks = [], dropUntil = 0, dropShift = 0, tearUntil = 0, tear = null;
@@ -115,9 +116,40 @@
         grid[r * cols + c] = cell;
       }
     }
+    // 실루엣에서의 거리(칸): 안쪽은 테두리까지, 바깥은 몸까지 (8방향 BFS)
+    const dist = new Int16Array(cols * rows).fill(-1);
+    const q = [];
+    // 바깥 → 몸 거리
+    for (const p of cells) { dist[p.r * cols + p.c] = 0; q.push(p.r * cols + p.c); }
+    const HALO = Math.max(6, Math.round(S / ch / 13));
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h], r = (i / cols) | 0, c = i % cols, d = dist[i];
+      if (d >= HALO) continue;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) continue;
+        const j = rr * cols + cc;
+        if (dist[j] === -1) { dist[j] = d + 1; q.push(j); }
+      }
+    }
+    halo = [];
+    for (let i = 0; i < dist.length; i++) {
+      const d = dist[i];
+      if (d < 1) continue;
+      const k = 1 - d / (HALO + 1);
+      if (Math.random() > Math.pow(k, 1.4) * 0.6) continue;
+      const r = (i / cols) | 0, c = i % cols;
+      halo.push({ c, r, u: ((c + 0.5) * cw) / S, v: ((r + 0.5) * ch) / S, k, seed: Math.random(), g: HALO_CH[Math.floor(Math.random() * HALO_CH.length)] });
+    }
+    // 안쪽 테두리: 바깥 칸까지의 거리 (최대 4칸) → 서서히 옅어짐
     for (const p of cells) {
-      const n = (dc, dr) => grid[(p.r + dr) * cols + (p.c + dc)];
-      p.edge = !(n(1, 0) && n(-1, 0) && n(0, 1) && n(0, -1));
+      let din = 4;
+      for (let rr = -3; rr <= 3 && din > 1; rr++) for (let cc = -3; cc <= 3; cc++) {
+        if (!rr && !cc) continue;
+        const R = p.r + rr, C = p.c + cc;
+        if (R < 0 || C < 0 || R >= rows || C >= cols || !grid[R * cols + C]) din = Math.min(din, Math.max(Math.abs(rr), Math.abs(cc)));
+      }
+      p.din = din;
     }
     rain = [];
     const vw = cv.width / dpr;
@@ -185,6 +217,26 @@
     const su = box.depth / S, sv = box.slotH / S;
     const inBlock = (p) => blocks.some((b) => p.c >= b.c && p.c < b.c + b.w && p.r >= b.r && p.r < b.r + b.h);
 
+    // 몸 바깥으로 희미하게 퍼지는 ASCII
+    for (const h of halo) {
+      if (Math.random() < 0.12) h.g = HALO_CH[Math.floor(Math.random() * HALO_CH.length)];
+      const flick = 0.55 + 0.45 * Math.sin(t * (2 + h.seed * 5) + h.seed * 30);
+      if (flick < 0.25) continue;
+      let a = Math.pow(h.k, 1.6) * 0.55 * flick;
+      let shade = h.k > 0.6 ? 2 : 1;
+      if (Math.random() < 0.02) shade = CYAN;
+      const sd = Math.abs(h.v - scanV);
+      if (sd < 0.012) { a = Math.min(1, a + 0.35); shade = 3; }
+      if (lockT >= 0) {
+        const wv = Math.max(0, 1 - Math.abs(Math.hypot(h.u - PORT.x, h.v - PORT.y) - lockT * 0.75) / 0.05);
+        if (wv > 0.3) { a = Math.min(1, a + 0.5 * wv); shade = 4; }
+      }
+      let x = ox + h.c * cw + Math.sin(t * 1.3 + h.seed * 20) * cw * 0.3 * (1 - h.k);
+      if (tear && h.r >= tear.r0 && h.r < tear.r1) x += tear.shift * cw;
+      ctx.globalAlpha = dropping ? a * 0.55 : a;
+      ctx.drawImage(atlas[shade][h.g], x - cw * 0.15, oy + h.r * ch - ch * 0.1, cw * 1.3, ch * 1.2);
+    }
+
     for (const p of cells) {
       const diff = Math.max(0, p.nx * lx + p.ny * ly + p.nz * lz);
       const back = Math.pow(Math.max(0, p.nx * rx + p.ny * ry + p.nz * rz), 1.6);
@@ -192,7 +244,6 @@
       const spec = Math.pow(Math.max(0, 2 * diff * p.nz - lz), p.mat === 3 ? 8 : 30);
       let v = p.ao * (0.1 + 0.85 * diff) + 0.3 * back + 0.15 * rim * p.ao + (p.mat === 3 ? 0.6 : 0.3) * spec;
       v = Math.pow(Math.min(1, v * 1.08), 1.05) * (0.94 + 0.06 * Math.sin(t * 7 + p.seed * 40)) * p.fade;
-      if (p.edge) v = Math.max(v, 0.45);
 
       let shade = v < 0.15 ? 0 : v < 0.3 ? 1 : v < 0.5 ? 2 : v < 0.7 ? 3 : v < 0.87 ? 4 : 5;
       let glyph;
@@ -229,6 +280,8 @@
       let x = ox + p.c * cw;
       const y = oy + p.r * ch;
       let a = Math.max(0.28, Math.min(1, 0.28 + v * 1.1));
+      a *= 0.45 + 0.55 * Math.min(1, (p.din - 1) / 3);              // 테두리로 갈수록 옅게
+      if (p.din <= 1 && Math.random() < 0.35) glyph = HALO_CH[Math.floor(Math.random() * HALO_CH.length)];
       if (p.r % 2 === 1) a *= 0.86;
       if (dropping) a *= 0.55;
       if (tear && p.r >= tear.r0 && p.r < tear.r1) {
