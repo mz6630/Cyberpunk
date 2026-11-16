@@ -245,7 +245,7 @@
       let v = p.ao * (0.1 + 0.85 * diff) + 0.3 * back + 0.15 * rim * p.ao + (p.mat === 3 ? 0.6 : 0.3) * spec;
       v = Math.pow(Math.min(1, v * 1.08), 1.05) * (0.94 + 0.06 * Math.sin(t * 7 + p.seed * 40)) * p.fade;
 
-      let shade = v < 0.15 ? 0 : v < 0.3 ? 1 : v < 0.5 ? 2 : v < 0.7 ? 3 : v < 0.87 ? 4 : 5;
+      let shade = v < 0.2 ? 0 : v < 0.42 ? 1 : v < 0.65 ? 2 : v < 0.85 ? 3 : v < 0.95 ? 4 : 5;
       let glyph;
       if (p.mat === 3) {
         glyph = p.metalCh;
@@ -255,8 +255,11 @@
         glyph = Math.random() < 0.85 ? '=' : '|';
         shade = v > 0.45 ? STEEL : 1;
       } else if (p.mat === 5) {
-        glyph = v > 0.45 ? '@' : 'o';
-        shade = Math.random() < 0.2 ? CYAN : 5;
+        // 눈: 얼굴과 같은 붉은 톤, 조금 어둡게 + 아주 가끔 시안 반짝임
+        v *= 0.55;
+        glyph = RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
+        shade = v < 0.15 ? 0 : v < 0.3 ? 1 : 2;
+        if (Math.random() < 0.04) shade = CYAN;
       } else {
         glyph = RAMP[Math.min(RAMP.length - 1, Math.floor(v * RAMP.length))];
         if ((glyph === '1' || glyph === '0') && Math.random() < 0.08) glyph = Math.random() < 0.5 ? '0' : '1';
@@ -265,7 +268,7 @@
       const sd = Math.abs(p.v - scanV);
       if (sd < 0.012) { glyph = Math.random() < 0.5 ? '0' : '1'; shade = Math.min(5, shade + 2); v = 1; }
       else if (sd < 0.03) shade = Math.min(5, shade + 1);
-      if (p.mat === 1 && back > 0.7 && Math.random() < 0.05) shade = CYAN;
+      if (p.mat === 1 && back > 0.6 && Math.random() < 0.12) shade = CYAN;          // 뒤쪽 테두리에 시안 빛
       if (inBlock(p)) { glyph = pickNoise(); shade = Math.random() < 0.3 ? CYAN : Math.random() < 0.5 ? 5 : 3; v = 1; }
 
       if (lockT >= 0) {
@@ -279,7 +282,9 @@
 
       let x = ox + p.c * cw;
       const y = oy + p.r * ch;
-      let a = Math.max(0.28, Math.min(1, 0.28 + v * 1.1));
+      if (Math.random() < 0.14) continue;                            // 디지털 드롭아웃 (드문드문)
+      let a = Math.max(0.1, Math.min(0.78, 0.08 + v * 0.8));
+      a *= 0.72 + 0.28 * Math.sin(p.r * 0.32 - t * 5.5);              // 홀로그램 가로 띠
       a *= 0.45 + 0.55 * Math.min(1, (p.din - 1) / 3);              // 테두리로 갈수록 옅게
       if (p.din <= 1 && Math.random() < 0.35) glyph = HALO_CH[Math.floor(Math.random() * HALO_CH.length)];
       if (p.r % 2 === 1) a *= 0.86;

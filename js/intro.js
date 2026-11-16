@@ -638,9 +638,9 @@
 
   // 레퍼런스 이미지 9장에서 추출한 카프리 색
   const CAPRI = { pink: '#ef0751', green: '#17ee7f', violet: '#8732c4', light: '#fb8295', black: '#07060d' };
-  const CHIP_RATIO = 220 / 1000;        // assets/chip.svg 세로/가로
-  const PIN_CY = 110 / 220;             // 칩 높이 대비 핀 중심
-  const PIN_SPAN = 100 / 220;           // 칩 높이 대비 핀 높이
+  const CHIP_RATIO = 495 / 2356;        // assets/chip.png 세로/가로
+  const PIN_CY = 0.516;                 // 칩 높이 대비 핀 중심
+  const PIN_SPAN = 0.664;               // 칩 높이 대비 핀 높이
   const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
   const STORM_DUR = reduceMotion ? 1.6 : 2.3;
   const BLACK_HOLD = 3.0;          // 정전 후 어둠이 이어지는 시간 → 그다음 AI의 눈
@@ -667,7 +667,7 @@
     const CW = Math.min(vw * (portrait ? 0.44 : 0.3), 440, (neck * 0.32) / (CHIP_RATIO * PIN_SPAN));
     const CH = CW * CHIP_RATIO;
     const slotH = CH * PIN_SPAN * 1.18;
-    const depth = CW * 0.13;                       // 핀 + 본체 끝이 목 안으로
+    const depth = CW * 0.12;                       // 핀이 목 안으로
     const startX = Math.min(portX + Math.max(70, vw * 0.1), vw - CW - 12);
     L = { vw, vh, CW, CH, cy, portRight: portX, slotH, startX, startY: cy - CH * PIN_CY, depth, body: { left, top, size: S } };
 
