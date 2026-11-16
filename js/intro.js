@@ -18,7 +18,7 @@
   11.50 – 19.00 붉은 노이즈 배경 유지 → 메인으로 전환
 
    효과음: js/sfx.js (Web Audio 합성, 자동 재생 시도 → 막히면 첫 클릭부터 이어서 재생)
-   칩 스테이지: 11.65초부터 붉은 화면에서 칩을 포트에 꽂으면 → 카프리 스파크 → 정전(3초) → AI의 눈 (js/eyes.js)
+   칩 스테이지: 11.65초부터 0과 1로 된 사람의 목 뒤 포트에 칩을 꽂으면 → 카프리 스파크 → 정전(3초) → AI의 눈 (js/eyes.js)
    로고 이미지: assets/logo.png (영상에서 추출한 'Cyberpunk' 글자, 투명 배경)
    아래 줄 'WEBSITE'는 SUB 설정으로 캔버스에 직접 그립니다 (Barlow Condensed).
    ========================================================= */
@@ -632,21 +632,22 @@
   const chip = document.getElementById('chip');
   const guide = document.getElementById('guide');
   const hint = document.getElementById('stage-hint');
+  const bodyCanvas = document.getElementById('body-canvas');
   const fxCanvas = document.getElementById('fx-canvas');
   const fxCtx = fxCanvas.getContext('2d');
 
   // 레퍼런스 이미지 9장에서 추출한 카프리 색
   const CAPRI = { pink: '#ef0751', green: '#17ee7f', violet: '#8732c4', light: '#fb8295', black: '#07060d' };
-  const CHIP_RATIO = 235 / 1100;        // assets/chip.png 세로/가로
-  const PIN_CY = 0.522;                 // 칩 높이 대비 핀 중심
-  const PIN_SPAN = 0.84 - 0.205;        // 칩 높이 대비 핀 높이
+  const CHIP_RATIO = 240 / 1000;        // assets/chip.svg 세로/가로
+  const PIN_CY = 121 / 240;             // 칩 높이 대비 핀 중심
+  const PIN_SPAN = 98 / 240;            // 칩 높이 대비 핀 높이
   const STAGE_AT = T.bgBackEnd + 0.15;  // 붉은 화면이 다 켜진 직후
   const STORM_DUR = reduceMotion ? 1.6 : 2.3;
   const BLACK_HOLD = 3.0;          // 정전 후 어둠이 이어지는 시간 → 그다음 AI의 눈
 
   let mode = 'intro';                   // intro → stage → insert → storm → black
   let L = null;                         // 레이아웃 (CSS px)
-  let chipPos = { x: 0, y: 0, rot: -6 };
+  let chipPos = { x: 0, y: 0, rot: 0 };
   let drag = null;
   let stormStart = 0;
   let blackStart = 0;
@@ -654,28 +655,40 @@
 
   function layoutStage() {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const CW = Math.min(vw * (vw < vh ? 0.52 : 0.42), 620, vh * 1.5);
+    const portrait = vw < vh;
+    // 0과 1로 된 사람 (아래쪽에 붙여 어깨가 화면 밖으로 이어지게)
+    const S = Math.min(vh * (portrait ? 0.66 : 0.9), vw * (portrait ? 1.05 : 0.58));
+    const left = vw * (portrait ? 0.46 : 0.4) - window.BinaryBody.PORT.x * S;
+    const top = vh - S;
+    const portX = left + window.BinaryBody.PORT.x * S;
+    const cy = top + window.BinaryBody.PORT.y * S;
+    // 칩: 정면, 핀 높이가 목 포트에 맞게
+    const neck = window.BinaryBody.NECK_W * S;
+    const CW = Math.min(vw * (portrait ? 0.46 : 0.34), 480, (neck * 0.42) / (CHIP_RATIO * PIN_SPAN));
     const CH = CW * CHIP_RATIO;
-    const cy = vh * 0.47;
-    const portW = Math.max(90, CW * 0.34);
-    const portH = Math.max(70, CH * 1.75);
-    const portRight = Math.max(portW + 16, vw * 0.5 - CW * 0.3);
-    const slotH = CH * PIN_SPAN * 1.12;
-    const startX = Math.min(portRight + Math.max(70, vw * 0.1), vw - CW - 12);
-    L = { vw, vh, CW, CH, cy, portW, portH, portRight, slotH, startX, startY: cy - CH * PIN_CY, depth: CW * 0.13 };
+    const slotH = CH * PIN_SPAN * 1.18;
+    const depth = CW * 0.16;                       // 핀 + 헤드 일부가 목 안으로
+    const startX = Math.min(portX + Math.max(70, vw * 0.1), vw - CW - 12);
+    L = { vw, vh, CW, CH, cy, portRight: portX, slotH, startX, startY: cy - CH * PIN_CY, depth, body: { left, top, size: S } };
 
-    Object.assign(port.style, { left: `${portRight - portW}px`, top: `${cy - portH / 2}px`, width: `${portW}px`, height: `${portH}px` });
-    port.style.setProperty('--slot-top', `${portH / 2 - slotH / 2}px`);
-    port.style.setProperty('--slot-h', `${slotH}px`);
+    // 라벨은 포트 오른쪽 위 (몸과 겹치지 않게)
+    Object.assign(port.style, { left: `${portX + 12}px`, top: `${cy - slotH / 2 - 52}px`, width: '220px', height: '0px' });
+    port.querySelector('.port-label').style.textAlign = 'left';
     Object.assign(chip.style, { width: `${CW}px`, height: `${CH}px` });
-    const gx0 = portRight + 14, gx1 = startX - 14;
+    const gx0 = portX + 14, gx1 = startX - 14;
     Object.assign(guide.style, { left: `${gx0}px`, top: `${cy}px`, width: `${Math.max(0, gx1 - gx0)}px`, display: gx1 - gx0 > 30 ? '' : 'none' });
-    hint.style.top = `${cy + portH / 2 + 64}px`;
+    hint.style.top = `${Math.min(vh - 70, cy + CH / 2 + 40)}px`;
+    hint.style.left = `${Math.max(16, portX)}px`;
+    hint.style.textAlign = 'left';
+  }
+
+  function startBody() {
+    window.BinaryBody.start(bodyCanvas, { ...L.body, slotH: L.slotH, depth: L.depth });
   }
 
   function placeChip() {
-    chip.style.transform = `translate(${chipPos.x}px, ${chipPos.y}px) rotate(${chipPos.rot}deg)`;
-    const inside = L.portRight - chipPos.x;      // 포트 안으로 들어간 부분은 가림
+    chip.style.transform = `translate(${chipPos.x}px, ${chipPos.y}px)`;     // 항상 정면
+    const inside = L.portRight - chipPos.x;      // 목 안으로 들어간 부분은 가림
     chip.style.clipPath = mode === 'insert' && inside > 0 ? `inset(-40px -40px -40px ${inside}px)` : '';
   }
 
@@ -683,6 +696,7 @@
     mode = 'intro';
     stage.hidden = true;
     stage.className = '';
+    if (window.BinaryBody) window.BinaryBody.stop();
     port.className = '';
     portStatus.textContent = 'SLOT 01 // AWAITING SHARD';
     intro.style.transform = '';
@@ -694,8 +708,9 @@
   function enterStage() {
     mode = 'stage';
     layoutStage();
-    chipPos = { x: L.startX, y: L.startY, rot: -6 };
+    chipPos = { x: L.startX, y: L.startY, rot: 0 };
     placeChip();
+    startBody();
     stage.hidden = false;
     requestAnimationFrame(() => stage.classList.add('is-on'));
   }
@@ -720,17 +735,19 @@
     if (!drag || e.pointerId !== drag.id) return;
     chipPos.x = e.clientX - drag.dx;
     chipPos.y = e.clientY - drag.dy;
-    chipPos.rot += (0 - chipPos.rot) * 0.3;
     placeChip();
-    port.classList.toggle('is-near', tipDistance() < snapRadius() * 2);
+    const isNear = tipDistance() < snapRadius() * 2;
+    port.classList.toggle('is-near', isNear);
+    window.BinaryBody.setNear(isNear);
   });
   const endDrag = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     drag = null;
     stage.classList.remove('is-dragging');
     port.classList.remove('is-near');
+    window.BinaryBody.setNear(false);
     if (tipDistance() < snapRadius()) insertChip();
-    else { chipPos.rot = -3; placeChip(); }
+    else placeChip();
   };
   chip.addEventListener('pointerup', endDrag);
   chip.addEventListener('pointercancel', endDrag);
@@ -755,11 +772,12 @@
     SFX.unlock().then(syncAudio);
     mode = 'insert';
     stage.classList.add('is-inserting');
-    const aligned = { x: L.portRight + 4, y: L.cy - L.CH * PIN_CY, rot: 0 };
+    const aligned = { x: L.portRight + 2, y: L.cy - L.CH * PIN_CY, rot: 0 };
     tween({ ...chipPos }, aligned, 260, (k) => 1 - Math.pow(1 - k, 3), () => {
       SFX.insert();
       tween({ ...aligned }, { ...aligned, x: aligned.x - L.depth }, 300, (k) => k * k, () => {
         port.classList.add('is-locked');
+        window.BinaryBody.lock();
         portStatus.textContent = 'SHARD LINKED // CAPRI.EXE';
         // 핸드셰이크 후 폭풍
         setTimeout(startStorm, 420);
@@ -1077,6 +1095,7 @@
     blackStart = performance.now();
     intro.style.transform = '';
     stage.classList.add('is-gone');
+    window.BinaryBody.stop();
     fxCtx.setTransform(1, 0, 0, 1, 0, 0);
     fxCtx.clearRect(0, 0, W, H);
     fxShapes = [];
@@ -1195,7 +1214,7 @@
   });
   window.addEventListener('resize', () => {
     resize();
-    if (mode === 'stage') { layoutStage(); chipPos = { x: L.startX, y: L.startY, rot: -6 }; placeChip(); }
+    if (mode === 'stage') { layoutStage(); chipPos = { x: L.startX, y: L.startY, rot: 0 }; placeChip(); startBody(); }
   });
   replayBtn.addEventListener('click', () => { SFX.unlock(); start(); });
   SFX.onReady(syncAudio);   // 어떤 경로로든 오디오가 켜지면 바로 맞춰 재생
