@@ -655,33 +655,61 @@
 
   function layoutStage() {
     const vw = window.innerWidth, vh = window.innerHeight;
-    const portrait = vw < vh;
-    // 0과 1로 된 사람 (아래쪽에 붙여 어깨가 화면 밖으로 이어지게)
-    const S = Math.min(vh * (portrait ? 0.62 : 0.94), vw * (portrait ? 1.0 : 0.56));
-    const left = vw * (portrait ? 0.5 : 0.36) - 0.5 * S;            // 정면 흉상, 왼쪽에 배치
-    const top = vh - S;
-    const portX = left + window.BinaryBody.PORT.x * S;
-    const cy = top + window.BinaryBody.PORT.y * S;
-    // 칩: 정면, 핀 높이가 목 포트에 맞게
+    const tall = vw < vh * 1.15;                  // 세로 화면 (휴대폰·태블릿 세로)
+    const PORT = window.BinaryBody.PORT;
+    let S, left, top, CW, startX, startY;
+    if (tall) {
+      // 위: 흉상이 화면 위쪽을 채움 (포트가 화면 42% 지점에 오게, 어깨는 왼쪽 밖으로 이어짐)
+      S = Math.min(vw * 1.08, vh * 0.6);
+      left = vw * 0.42 - PORT.x * S;
+      top = Math.max(vh * 0.04, Math.min(vh * 0.08, vh * 0.62 - S));
+    } else {
+      // 가로 화면: 흉상 왼쪽, 칩 오른쪽
+      S = Math.min(vh * 0.94, vw * 0.56);
+      left = vw * 0.36 - 0.5 * S;
+      top = vh - S;
+    }
+    const portX = left + PORT.x * S;
+    const cy = top + PORT.y * S;
     const neck = window.BinaryBody.NECK_W * S;
-    const CW = Math.min(vw * (portrait ? 0.44 : 0.3), 440, (neck * 0.32) / (CHIP_RATIO * PIN_SPAN));
+    if (tall) {
+      // 꽂힌 자리(포트 오른쪽)에서도 화면 안에 들어오는 크기
+      CW = Math.min(vw - portX - 16, vw * 0.58, 380, (neck * 0.42) / (CHIP_RATIO * PIN_SPAN));
+    } else {
+      CW = Math.min(vw * 0.3, 440, (neck * 0.32) / (CHIP_RATIO * PIN_SPAN));
+    }
     const CH = CW * CHIP_RATIO;
     const slotH = CH * PIN_SPAN * 1.18;
     const depth = CW * 0.12;                       // 핀이 목 안으로
-    const startX = Math.min(portX + Math.max(70, vw * 0.1), vw - CW - 12);
-    L = { vw, vh, CW, CH, cy, portRight: portX, slotH, startX, startY: cy - CH * PIN_CY, depth, body: { left, top, size: S } };
+    if (tall) {
+      // 칩은 흉상 아래 오른쪽에서 대기 → 위로 끌어 올려 목 포트에
+      startX = vw - CW - 16;
+      startY = Math.min(vh - CH - 120, Math.max(cy + CH * 1.6, top + S * 0.92));
+    } else {
+      startX = Math.min(portX + Math.max(70, vw * 0.08), vw - CW - 16);
+      startY = cy - CH * PIN_CY;
+    }
+    L = { vw, vh, tall, CW, CH, cy, portRight: portX, slotH, startX, startY, depth, body: { left, top, size: S } };
 
-    // 라벨은 포트 오른쪽 위 (몸과 겹치지 않게)
-    Object.assign(port.style, { left: `${portX + 12}px`, top: `${cy - slotH / 2 - 52}px`, width: '220px', height: '0px' });
+    // 포트 라벨: 포트 오른쪽 위, 칩 위로 (화면 밖으로 나가지 않게)
+    const labelW = Math.max(120, Math.min(240, vw - portX - 20));
+    Object.assign(port.style, { left: `${portX + 12}px`, top: `${cy - Math.max(slotH, CH) / 2 - 46}px`, width: `${labelW}px`, height: '0px' });
     port.querySelector('.port-label').style.textAlign = 'left';
+    port.querySelector('.port-label').style.whiteSpace = labelW < 200 ? 'normal' : 'nowrap';
     Object.assign(chip.style, { width: `${CW}px`, height: `${CH}px` });
+    // 안내선: 가로 화면에서만 (포트 → 칩)
     const gx0 = portX + 14, gx1 = startX - 14;
-    Object.assign(guide.style, { left: `${gx0}px`, top: `${cy}px`, width: `${Math.max(0, gx1 - gx0)}px`, display: gx1 - gx0 > 30 ? '' : 'none' });
-    // 안내 문구는 칩 아래 (인물과 겹치지 않게)
-    hint.style.top = `${Math.min(vh - 70, cy + CH / 2 + 34)}px`;
-    hint.style.left = `${startX}px`;
-    hint.style.right = '16px';
-    hint.style.textAlign = 'left';
+    Object.assign(guide.style, { left: `${gx0}px`, top: `${cy}px`, width: `${Math.max(0, gx1 - gx0)}px`, display: !tall && gx1 - gx0 > 30 ? '' : 'none' });
+    // 안내 문구
+    if (tall) {
+      Object.assign(hint.style, { top: `${Math.min(vh - 64, startY + CH + 26)}px`, left: '16px', right: '16px', textAlign: 'center' });
+      hint.firstChild.textContent = 'DRAG THE SHARD UP INTO THE NECK PORT';
+      hint.querySelector('span').textContent = '칩을 위로 끌어 목 포트에 꽂으세요 · Enter';
+    } else {
+      Object.assign(hint.style, { top: `${Math.min(vh - 64, cy + CH / 2 + 30)}px`, left: `${startX}px`, right: '16px', textAlign: 'left' });
+      hint.firstChild.textContent = 'JACK THE SHARD INTO THE NECK PORT';
+      hint.querySelector('span').textContent = '칩을 끌어서 목 포트에 꽂으세요 · Enter';
+    }
   }
 
   function startBody() {
@@ -749,7 +777,12 @@
     port.classList.remove('is-near');
     window.BinaryBody.setNear(false);
     if (tipDistance() < snapRadius()) insertChip();
-    else placeChip();
+    else {
+      // 화면 밖으로 끌고 나가면 대기 위치로 돌아옴
+      const out = chipPos.x < -L.CW * 0.5 || chipPos.x > L.vw - L.CW * 0.3 || chipPos.y < -L.CH || chipPos.y > L.vh - L.CH * 0.3;
+      if (out) tween({ ...chipPos }, { x: L.startX, y: L.startY, rot: 0 }, 260, (k) => 1 - Math.pow(1 - k, 3));
+      else placeChip();
+    }
   };
   chip.addEventListener('pointerup', endDrag);
   chip.addEventListener('pointercancel', endDrag);
@@ -1215,10 +1248,20 @@
     }
     if (mode === 'intro') interact();
   });
+  // 화면 크기 변화: 모바일 주소창이 생겼다 사라지는 작은 높이 변화는 무시하고, 잠깐 기다렸다 한 번만 다시 배치
+  let rsTimer = 0, lastVW = window.innerWidth, lastVH = window.innerHeight;
   window.addEventListener('resize', () => {
-    resize();
-    if (mode === 'stage') { layoutStage(); chipPos = { x: L.startX, y: L.startY, rot: 0 }; placeChip(); startBody(); }
+    clearTimeout(rsTimer);
+    rsTimer = setTimeout(() => {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const big = vw !== lastVW || Math.abs(vh - lastVH) > 120;
+      resize();
+      if (!big) return;
+      lastVW = vw; lastVH = vh;
+      if (mode === 'stage' && !drag) { layoutStage(); chipPos = { x: L.startX, y: L.startY, rot: 0 }; placeChip(); startBody(); }
+    }, 180);
   });
+  window.addEventListener('orientationchange', () => window.dispatchEvent(new Event('resize')));
   replayBtn.addEventListener('click', () => { SFX.unlock(); start(); });
   SFX.onReady(syncAudio);   // 어떤 경로로든 오디오가 켜지면 바로 맞춰 재생
 

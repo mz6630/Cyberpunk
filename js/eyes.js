@@ -66,7 +66,7 @@
     const vw = window.innerWidth, vh = window.innerHeight;
     W = Math.floor(vw * dpr); H = Math.floor(vh * dpr);
     canvas.width = W; canvas.height = H;
-    const S = Math.min(vw, vh * 1.6);
+    const S = vw < vh ? Math.min(vw * 1.4, vh * 0.9) : Math.min(vw, vh * 1.6);   // 세로 화면에서는 더 크게
     const R = clamp(S * 0.085, 40, 118);
     const D = R * 3.1;
     geo = { vw, vh, R, cy: vh * 0.45, cx: [vw / 2 - D / 2, vw / 2 + D / 2] };

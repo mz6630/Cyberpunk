@@ -110,6 +110,7 @@ html, body {
   border: none;
   clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
   cursor: pointer;
+  white-space: nowrap;
 }
 #replay:hover { background: var(--cyan); }
 
@@ -307,3 +308,21 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   #chip img, #stage-hint, #guide, .port-leds i { animation: none; }
 }
+
+/* ---------- 모바일 ---------- */
+html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+#intro, #site { touch-action: none; -webkit-user-select: none; user-select: none; }
+#site #replay { touch-action: manipulation; }
+@media (max-width: 600px) {
+  #stage-hint { letter-spacing: 0.14em; font-size: 13px; }
+  #stage-hint span { font-size: 11px; }
+  .port-label { font-size: 10px; letter-spacing: 0.16em; }
+  #site .site-ui { left: 16px; top: 14px; right: 16px; }
+  #site #replay { bottom: max(20px, env(safe-area-inset-bottom)); padding: 10px 20px; font-size: 14px; }
+}
+@media (max-height: 460px) and (orientation: landscape) {
+  #stage-hint { font-size: 12px; letter-spacing: 0.14em; }
+  #stage-hint span { display: none; }
+  .port-label span { display: none; }
+}
+@media (max-width: 400px) { #stage-hint { font-size: 12px; letter-spacing: 0.1em; } }
